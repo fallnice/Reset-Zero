@@ -1,0 +1,52 @@
+# ===== Unity 自动生成的垃圾文件（禁止提交）=====
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# ===== 项目元数据（本地临时）=====
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+sysinfo.txt
+crashlytics-build.properties
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# ===== 构建产物 =====
+*.apk
+*.aab
+*.unitypackage
+*.app
+ExportedObj/
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vs/
+.vscode/
+*.DotSettings.user
+.consulo/
+
+# ===== 系统文件 =====
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# ===== 重要：以下内容必须提交，不要忽略 =====
+# Assets/ 、Packages/ 、ProjectSettings/ 必须进版本管理
+# *.meta 必须进版本管理（Unity 资源 GUID 引用的命根子）
