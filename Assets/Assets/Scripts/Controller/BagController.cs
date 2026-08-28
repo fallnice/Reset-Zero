@@ -10,26 +10,26 @@ namespace Controller
     {
         private BagDao _bagDao;
         private ItemDao _itemDao;
-        private List<BagSlotInfo> _slotList; // ÄÚ´æ±³°üÊı¾İ»º´æ
+        private List<BagSlotInfo> _slotList; // å†…å­˜èƒŒåŒ…æ•°æ®ç¼“å­˜
         private const int MAX_SLOT = 30;
-        public int MaxSlot => MAX_SLOT;//¹«¿ª
+        public int MaxSlot => MAX_SLOT;//å…¬å¼€
 
         public void Init()
         {
             _bagDao = new BagDao();
             _itemDao = new ItemDao();
-            _slotList = _bagDao.LoadAllSlots(); // Æô¶¯Ê±´ÓÊı¾İ¿â¼ÓÔØ
+            _slotList = _bagDao.LoadAllSlots(); // å¯åŠ¨æ—¶ä»æ•°æ®åº“åŠ è½½
         }
 
         /// <summary>
-        /// »ñÈ¡ËùÓĞ±³°ü¸ñ×ÓÊı¾İ£¨¸øViewË¢ĞÂÓÃ£©
+        /// è·å–æ‰€æœ‰èƒŒåŒ…æ ¼å­æ•°æ®ï¼ˆç»™Viewåˆ·æ–°ç”¨ï¼‰
         /// </summary>
         public List<BagSlotInfo> GetAllSlots()
         {
             return _slotList;
         }
         /// <summary>
-        /// »ñÈ¡±³°üÒÑÕ¼ÓĞ¸ñ×ÓÊıÁ¿
+        /// è·å–èƒŒåŒ…å·²å æœ‰æ ¼å­æ•°é‡
         /// </summary>
         /// <returns></returns>
         public int GetUsedSlotCount()
@@ -43,7 +43,7 @@ namespace Controller
         }
 
         /// <summary>
-        /// Ìí¼ÓÎïÆ·£º×Ô¶¯¶Ñµş¡¢30¸ñÉÏÏŞĞ£Ñé
+        /// æ·»åŠ ç‰©å“ï¼šè‡ªåŠ¨å †å ã€30æ ¼ä¸Šé™æ ¡éªŒ
         /// </summary>
         public bool AddItem(int itemId, int count)
         {
@@ -51,14 +51,14 @@ namespace Controller
             ItemInfo item = _itemDao.GetItemById(itemId);
             if (item == null)
             {
-                Debug.LogError($"ÎïÆ·²»´æÔÚ ID:{itemId}");
+                Debug.LogError($"ç‰©å“ä¸å­˜åœ¨ ID:{itemId}");
                 return false;
             }
 
             int remain = count;
             int maxStack = item.MaxStack;
 
-            // 1. ÓÅÏÈ¶ÑµşÒÑÓĞÎïÆ·
+            // 1. ä¼˜å…ˆå †å å·²æœ‰ç‰©å“
             foreach (var slot in _slotList)
             {
                 if (slot.ItemId == itemId && slot.ItemCount < maxStack)
@@ -73,7 +73,7 @@ namespace Controller
                 }
             }
 
-            // 2. Ê£Óà·Å¿Õ¸ñ×Ó
+            // 2. å‰©ä½™æ”¾ç©ºæ ¼å­
             if (remain > 0)
             {
                 foreach (var slot in _slotList)
@@ -93,7 +93,7 @@ namespace Controller
 
             if (remain > 0)
             {
-                Debug.LogWarning($"±³°üÒÑÂú£¬Ê£Óà{remain}¸öÎŞ·¨·ÅÈë");
+                Debug.LogWarning($"èƒŒåŒ…å·²æ»¡ï¼Œå‰©ä½™{remain}ä¸ªæ— æ³•æ”¾å…¥");
                 EventBus.Emit(EventName.Bag_Changed);
                 return false;
             }
@@ -103,7 +103,7 @@ namespace Controller
         }
 
         /// <summary>
-        /// ÒÆ³ıÎïÆ·
+        /// ç§»é™¤ç‰©å“
         /// </summary>
         public bool RemoveItem(int itemId, int count)
         {
@@ -111,7 +111,7 @@ namespace Controller
             int total = GetItemTotalCount(itemId);
             if (total < count)
             {
-                Debug.LogWarning($"ÎïÆ·²»×ã ID:{itemId} ÓµÓĞ:{total} ĞèÒª:{count}");
+                Debug.LogWarning($"ç‰©å“ä¸è¶³ ID:{itemId} æ‹¥æœ‰:{total} éœ€è¦:{count}");
                 return false;
             }
 
@@ -140,7 +140,37 @@ namespace Controller
         }
 
         /// <summary>
-        /// »ñÈ¡ÎïÆ·×ÜÊıÁ¿
+        /// é¢„æ£€èƒ½å¦æ”¾å…¥æŒ‡å®šæ•°é‡çš„ç‰©å“ï¼ˆä¸å®é™…ä¿®æ”¹èƒŒåŒ…ï¼‰
+        /// ç”¨äºåˆ¶ä½œå‰ç©ºé—´æ ¡éªŒï¼Œé¿å…äº‹åŠ¡ä¸­é€” AddItem å¤±è´¥å¯¼è‡´å†…å­˜/æ•°æ®åº“ä¸ä¸€è‡´
+        /// </summary>
+        public bool CanAddItem(int itemId, int count)
+        {
+            if (count <= 0) return false;
+            ItemInfo item = _itemDao.GetItemById(itemId);
+            if (item == null)
+            {
+                Debug.LogError($"ç‰©å“ä¸å­˜åœ¨ ID:{itemId}");
+                return false;
+            }
+
+            int capacity = 0;
+            int maxStack = item.MaxStack;
+            foreach (var slot in _slotList)
+            {
+                if (slot.ItemId == itemId)
+                {
+                    capacity += maxStack - slot.ItemCount; // å·²æœ‰åŒç±»å †å å‰©ä½™ç©ºé—´
+                }
+                else if (slot.ItemId == 0)
+                {
+                    capacity += maxStack; // ç©ºæ ¼å­å¯å®¹çº³
+                }
+            }
+            return capacity >= count;
+        }
+
+        /// <summary>
+        /// è·å–ç‰©å“æ€»æ•°é‡
         /// </summary>
         public int GetItemTotalCount(int itemId)
         {

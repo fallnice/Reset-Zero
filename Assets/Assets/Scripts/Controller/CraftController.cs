@@ -21,7 +21,7 @@ namespace Controller
         }
 
         /// <summary>
-        /// »ñÈ¡ËùÓĞÅä·½
+        /// è·å–æ‰€æœ‰é…æ–¹
         /// </summary>
         public Dictionary<int, RecipeInfo> GetAllRecipes()
         {
@@ -29,54 +29,59 @@ namespace Controller
         }
 
         /// <summary>
-        /// Ö´ĞĞÖÆ×÷
+        /// æ‰§è¡Œåˆ¶ä½œ
         /// </summary>
         public bool DoCraft(int recipeId)
         {
             if (!_recipeDict.TryGetValue(recipeId, out var recipe))
             {
-                Debug.LogError($"Åä·½²»´æÔÚ ID:{recipeId}");
+                Debug.LogError($"é…æ–¹ä¸å­˜åœ¨ ID:{recipeId}");
                 return false;
             }
 
-            // 1. Ğ£Ñé²ÄÁÏ
+            // 1. æ ¡éªŒææ–™
             foreach (var mat in recipe.Materials)
             {
                 int have = _inventory.GetItemTotalCount(mat.Key);
                 if (have < mat.Value)
                 {
-                    Debug.LogWarning($"²ÄÁÏ²»×ã ID:{mat.Key} ÓµÓĞ:{have} ĞèÒª:{mat.Value}");
+                    Debug.LogWarning($"ææ–™ä¸è¶³ ID:{mat.Key} æ‹¥æœ‰:{have} éœ€è¦:{mat.Value}");
                     return false;
                 }
             }
 
-            // 2. ÊÂÎñ±£Ö¤Ô­×ÓĞÔ
-            var transaction = SqliteManager.Instance.BeginTransaction();
+            // 2. é¢„æ£€èƒŒåŒ…ç©ºé—´ï¼šé¿å…äº‹åŠ¡ä¸­é€” AddItem å¤±è´¥å¯¼è‡´å†…å­˜/æ•°æ®åº“ä¸ä¸€è‡´
+            if (!_inventory.CanAddItem(recipe.ResultItemId, recipe.ResultCount))
+            {
+                Debug.LogWarning("åˆ¶ä½œå¤±è´¥ï¼šèƒŒåŒ…ç©ºé—´ä¸è¶³");
+                return false;
+            }
+
+            // 3. äº‹åŠ¡ä¿è¯åŸå­æ€§ï¼ˆSqliteManager ç»Ÿä¸€ç®¡ç†ï¼ŒDAO å†™æ“ä½œè‡ªåŠ¨ç»‘å®šå½“å‰äº‹åŠ¡ï¼‰
+            SqliteManager.Instance.BeginTransaction();
             try
             {
-                // ¿Û²ÄÁÏ
+                // æ‰£ææ–™
                 foreach (var mat in recipe.Materials)
                 {
                     _inventory.RemoveItem(mat.Key, mat.Value);
                 }
 
-                // ¼Ó³ÉÆ·
-                bool addSuccess = _inventory.AddItem(recipe.ResultItemId, recipe.ResultCount);
-                if (!addSuccess)
+                // åŠ æˆå“ï¼ˆç©ºé—´å·²é¢„æ£€ï¼Œæ­£å¸¸æƒ…å†µå¿…æˆåŠŸï¼›ä»åšé˜²å¾¡æ£€æŸ¥ï¼‰
+                if (!_inventory.AddItem(recipe.ResultItemId, recipe.ResultCount))
                 {
-                    transaction.Rollback();
-                    Debug.LogWarning("ÖÆ×÷Ê§°Ü£º±³°ü¿Õ¼ä²»×ã");
+                    SqliteManager.Instance.RollbackTransaction();
+                    Debug.LogWarning("åˆ¶ä½œå¤±è´¥ï¼šæ”¾å…¥æˆå“å¤±è´¥");
                     return false;
                 }
 
-                transaction.Commit();
-                Debug.Log($"ÖÆ×÷³É¹¦£¬»ñµÃÎïÆ·ID:{recipe.ResultItemId} ÊıÁ¿:{recipe.ResultCount}");
+                SqliteManager.Instance.CommitTransaction();
                 return true;
             }
             catch (System.Exception e)
             {
-                transaction.Rollback();
-                Debug.LogError("ÖÆ×÷Òì³££º" + e.Message);
+                SqliteManager.Instance.RollbackTransaction();
+                Debug.LogError("åˆ¶ä½œå¼‚å¸¸ï¼š" + e.Message);
                 return false;
             }
         }

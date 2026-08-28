@@ -4,25 +4,37 @@ using UnityEngine.UI;
 namespace View
 {
     /// <summary>
-    /// µ¥¸ö±³°ü¸ñ×ÓµÄUIÂß¼­£ºÖ»¸ºÔğÏÔÊ¾Êı¾İ£¬²»´¦ÀíÒµÎñ
+    /// å•ä¸ªèƒŒåŒ…æ ¼å­çš„UIé€»è¾‘ï¼šåªè´Ÿè´£æ˜¾ç¤ºæ•°æ®ï¼Œä¸å¤„ç†ä¸šåŠ¡
     /// </summary>
     public class BagSlotItem : MonoBehaviour
     {
-        [Header("×é¼şÒıÓÃ")]
-        public Image iconImage,iconParent;    // ÎïÆ·Í¼±ê
-        public Text countText; // ¶ÑµşÊıÁ¿
-        public Text nameText;//ÎïÆ·Ãû³Æ
+        [Header("ç»„ä»¶å¼•ç”¨")]
+        public Image iconImage,iconParent;    // ç‰©å“å›¾æ ‡
+        public Text countText; // å †å æ•°é‡
+        public Text nameText;//ç‰©å“åç§°
+        private bool _warned;   // åŒç±» Warning åªæ‰“å°ä¸€æ¬¡
 
         /// <summary>
-        /// ¸ø¸ñ×Ó¸³Öµ£¬Íâ²¿µ÷ÓÃÕâ¸ö·½·¨Ë¢ĞÂÏÔÊ¾
+        /// ç»™æ ¼å­èµ‹å€¼ï¼Œå¤–éƒ¨è°ƒç”¨è¿™ä¸ªæ–¹æ³•åˆ·æ–°æ˜¾ç¤º
         /// </summary>
-        /// <param name="itemId">ÎïÆ·ID£¬0=¿Õ¸ñ×Ó</param>
-        /// <param name="count">ÎïÆ·ÊıÁ¿</param>
-        /// <param name="icon">ÎïÆ·Í¼±ê</param>
-        /// <param name="itemName">ÎïÆ·Ãû³Æ</param>
+        /// <param name="itemId">ç‰©å“IDï¼Œ0=ç©ºæ ¼å­</param>
+        /// <param name="count">ç‰©å“æ•°é‡</param>
+        /// <param name="icon">ç‰©å“å›¾æ ‡</param>
+        /// <param name="itemName">ç‰©å“åç§°</param>
         public void SetData(int itemId, int count, Sprite icon,string itemName)
         {
-            // ¿Õ¸ñ×Ó£ºÒş²ØÍ¼±ê£¬Çå¿ÕÎÄ×Ö
+            // ç»„ä»¶å¼•ç”¨ç¼ºå¤±æ—¶é™é»˜è·³è¿‡ï¼Œé¿å…ç©ºå¼•ç”¨
+            if (iconImage == null || iconParent == null || countText == null || nameText == null)
+            {
+                if (!_warned)
+                {
+                    _warned = true;
+                    Debug.LogWarning("[BagSlotItem] ç»„ä»¶å¼•ç”¨æœªå®Œæ•´èµ‹å€¼ï¼Œæ ¼å­æ— æ³•æ˜¾ç¤º");
+                }
+                return;
+            }
+
+            // ç©ºæ ¼å­ï¼šéšè—å›¾æ ‡ï¼Œæ¸…ç©ºæ–‡å­—
             if (itemId == 0 || count <= 0)
             {
                 iconImage.enabled = false;
@@ -32,12 +44,12 @@ namespace View
                 return;
             }
 
-            // ÓĞÎïÆ·£ºÏÔÊ¾Í¼±êºÍÊıÁ¿
+            // æœ‰ç‰©å“ï¼šæ˜¾ç¤ºå›¾æ ‡å’Œæ•°é‡
             iconParent.enabled = true;
             iconImage.enabled = true;
             iconImage.sprite = icon;
 
-            // ÊıÁ¿´óÓÚ1²ÅÏÔÊ¾Êı×Ö£¬µ¥¸öÎïÆ·²»ÏÔÊ¾
+            // æ•°é‡å¤§äº1æ‰æ˜¾ç¤ºæ•°å­—ï¼Œå•ä¸ªç‰©å“ä¸æ˜¾ç¤º
             countText.text = count >= 1 ? count.ToString() : "";
             nameText.text = itemName;
         }

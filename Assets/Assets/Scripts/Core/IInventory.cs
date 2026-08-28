@@ -13,6 +13,9 @@ namespace Core
         /// <summary>移除物品，返回是否成功</summary>
         bool RemoveItem(int itemId, int count);
 
+        /// <summary>预检能否放入指定数量的物品（不实际修改背包）</summary>
+        bool CanAddItem(int itemId, int count);
+
         /// <summary>获取物品总持有数量</summary>
         int GetItemTotalCount(int itemId);
     }

@@ -9,31 +9,39 @@ using UnityEngine.UI;
 namespace View
 {
     /// <summary>
-    /// ±³°üÃæ°åUI£¨MVC-View²ã£©
+    /// èƒŒåŒ…é¢æ¿UIï¼ˆMVC-Viewå±‚ï¼‰
     /// </summary>
     public class BagView : MonoBehaviour
     {
-        [Header("Ô¤ÖÆÌåÓë¸¸½Úµã")]
-        [SerializeField] private BagSlotItem slotPrefab; // ¸ñ×ÓÔ¤ÖÆÌå
-        [SerializeField] private Transform gridParent;   // ¸ñ×Ó¸¸½Úµã£¨Grid Layout Group£©
-        [Header("±³°üÈİÁ¿")]
+        [Header("é¢„åˆ¶ä½“ä¸çˆ¶èŠ‚ç‚¹")]
+        [SerializeField] private BagSlotItem slotPrefab; // æ ¼å­é¢„åˆ¶ä½“
+        [SerializeField] private Transform gridParent;   // æ ¼å­çˆ¶èŠ‚ç‚¹ï¼ˆGrid Layout Groupï¼‰
+        [Header("èƒŒåŒ…å®¹é‡")]
         [SerializeField] private Text capacityText;
 
         private BagController _controller;
         private readonly List<BagSlotItem> _slotItemList = new List<BagSlotItem>();
-        private ItemDao _itemDao = new ItemDao(); // ÎïÆ·ÅäÖÃÊı¾İ·ÃÎÊ
+        private ItemDao _itemDao = new ItemDao(); // ç‰©å“é…ç½®æ•°æ®è®¿é—®
         private EventBus.SubscriptionToken _bagChangedToken;
+        private bool _slotsInited;      // æ ¼å­æ˜¯å¦å·²ç”Ÿæˆï¼Œé˜²æ­¢é‡å¤
+        private bool _refreshWarned;    // åŒç±» Warning åªæ‰“å°ä¸€æ¬¡
 
         /// <summary>
-        /// °ó¶¨¿ØÖÆÆ÷£¬³õÊ¼»¯30¸ö¸ñ×Ó
+        /// ç»‘å®šæ§åˆ¶å™¨ï¼Œåˆå§‹åŒ–30ä¸ªæ ¼å­
         /// </summary>
         public void SetController(BagController controller)
         {
+            if (controller == null)
+            {
+                Debug.LogError("[BagView] SetController ä¼ å…¥çš„ controller ä¸º null");
+                return;
+            }
+
             _controller = controller;
             InitSlots();
             RefreshUI();
 
-            // ¶©ÔÄ£º±³°ü±ä»¯ ¡ú ×Ô¶¯Ë¢ĞÂ UI
+            // è®¢é˜…ï¼šèƒŒåŒ…å˜åŒ– â†’ è‡ªåŠ¨åˆ·æ–° UI
             _bagChangedToken = EventBus.Subscribe(EventName.Bag_Changed, _ => RefreshUI());
         }
 
@@ -42,9 +50,23 @@ namespace View
             _bagChangedToken?.Dispose();
         }
 
-        // Éú³É30¸ö¿Õ¸ñ×Ó
+        // ç”Ÿæˆ30ä¸ªç©ºæ ¼å­ï¼ˆåªæ‰§è¡Œä¸€æ¬¡ï¼Œé˜²æ­¢é‡å¤ç”Ÿæˆï¼‰
         private void InitSlots()
         {
+            if (_slotsInited) return;
+            _slotsInited = true;
+
+            if (slotPrefab == null)
+            {
+                Debug.LogError("[BagView] slotPrefab æœªèµ‹å€¼ï¼Œæ— æ³•ç”Ÿæˆæ ¼å­");
+                return;
+            }
+            if (gridParent == null)
+            {
+                Debug.LogError("[BagView] gridParent æœªèµ‹å€¼ï¼Œæ— æ³•ç”Ÿæˆæ ¼å­");
+                return;
+            }
+
             for (int i = 0; i < 30; i++)
             {
                 BagSlotItem slot = Instantiate(slotPrefab, gridParent);
@@ -53,31 +75,46 @@ namespace View
         }
 
         /// <summary>
-        /// Ë¢ĞÂÕû¸ö±³°üUI£¨Êı¾İ±ä¶¯Ê±ÓÉControllerµ÷ÓÃ£©
+        /// åˆ·æ–°æ•´ä¸ªèƒŒåŒ…UIï¼ˆæ•°æ®å˜åŠ¨æ—¶ç”±Controllerè°ƒç”¨ï¼‰
         /// </summary>
         public void RefreshUI()
         {
-            List<BagSlotInfo> slotDataList = _controller.GetAllSlots();
+            if (_controller == null)
+            {
+                if (!_refreshWarned)
+                {
+                    _refreshWarned = true;
+                    Debug.LogWarning("[BagView] RefreshUI æ—¶ controller ä¸º nullï¼Œè¯·å…ˆè°ƒç”¨ SetController");
+                }
+                return;
+            }
 
-            for (int i = 0; i < slotDataList.Count; i++)
+            List<BagSlotInfo> slotDataList = _controller.GetAllSlots();
+            if (slotDataList == null) return;
+
+            // å–è¾ƒå°å€¼ï¼Œé˜²æ­¢æ•°æ®æ ¼å­æ•°è¶…è¿‡å·²ç”Ÿæˆçš„ UI æ ¼å­æ•°å¯¼è‡´è¶Šç•Œ
+            int count = Mathf.Min(slotDataList.Count, _slotItemList.Count);
+            for (int i = 0; i < count; i++)
             {
                 BagSlotInfo data = slotDataList[i];
 
-                ItemInfo itemInfo = _itemDao.GetItemById(data.ItemId);
+                // itemId ä¸º 0 è¡¨ç¤ºç©ºæ ¼å­ï¼Œè·³è¿‡æ•°æ®åº“æŸ¥è¯¢
+                ItemInfo itemInfo = data.ItemId == 0 ? null : _itemDao.GetItemById(data.ItemId);
                 string itemName = itemInfo?.Name ?? "";
                 Sprite icon = LoadItemIcon(data.ItemId);
-                _slotItemList[i].SetData( data.ItemId, data.ItemCount, icon,itemName);
+                _slotItemList[i].SetData(data.ItemId, data.ItemCount, icon, itemName);
+            }
 
-                if (capacityText != null)
-                {
-                    int used = _controller.GetUsedSlotCount();
-                    int max = _controller.MaxSlot;
-                    capacityText.text = $"±³°ü ({used}/{max})";
-                }
+            // å®¹é‡æ–‡æœ¬åœ¨å¾ªç¯å¤–åªæ›´æ–°ä¸€æ¬¡
+            if (capacityText != null)
+            {
+                int used = _controller.GetUsedSlotCount();
+                int max = _controller.MaxSlot;
+                capacityText.text = $"èƒŒåŒ… ({used}/{max})";
             }
         }
 
-        // ¶¯Ì¬¼ÓÔØÎïÆ·Í¼±ê£¨Í¼±ê·ÅÔÚ Resources/ItemIcons ÏÂ£¬ÒÔÎïÆ·IDÃüÃû£©
+        // åŠ¨æ€åŠ è½½ç‰©å“å›¾æ ‡ï¼ˆå›¾æ ‡æ”¾åœ¨ Resources/ItemIcons ä¸‹ï¼Œä»¥ç‰©å“IDå‘½åï¼‰
         private Sprite LoadItemIcon(int itemId)
         {
             if (itemId == 0) return null;

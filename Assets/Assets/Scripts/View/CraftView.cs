@@ -10,37 +10,39 @@ using UnityEngine.UI;
 namespace View
 {
     /// <summary>
-    /// ÖÆ×÷Ãæ°åUI£¨MVC-View²ã£©
+    /// åˆ¶ä½œé¢æ¿UIï¼ˆMVC-Viewå±‚ï¼‰
     /// </summary>
     public class CraftView : MonoBehaviour
     {
-        [Header("×ó²àÅä·½ÁĞ±í")]
+        [Header("å·¦ä¾§é…æ–¹åˆ—è¡¨")]
         [SerializeField] private CraftRecipeItem recipeItemPrefab;
         [SerializeField] private Transform recipeListParent;
 
-        [Header("ÓÒ²àÏêÇé - ³ÉÆ·»ù´¡ĞÅÏ¢")]
+        [Header("å³ä¾§è¯¦æƒ… - æˆå“åŸºç¡€ä¿¡æ¯")]
         [SerializeField] private Image resultIconImg;
         [SerializeField] private Text itemNameText;
         [SerializeField] private Text ownCountText;
         [SerializeField] private Text descText;
 
-        [Header("ÓÒ²àÏêÇé - ²ÄÁÏÁĞ±í")]
+        [Header("å³ä¾§è¯¦æƒ… - ææ–™åˆ—è¡¨")]
         [SerializeField] private CraftMaterialItem materialItemPrefab;
-        [SerializeField] private Transform materialContainer; // ²ÄÁÏ´¹Ö±ÈİÆ÷
+        [SerializeField] private Transform materialContainer; // ææ–™å‚ç›´å®¹å™¨
 
-        [Header("ÖÆ×÷ÊıÁ¿¿ØÖÆ")]
+        [Header("åˆ¶ä½œæ•°é‡æ§åˆ¶")]
         [SerializeField] private Button minusBtn;
         [SerializeField] private Button plusBtn;
         [SerializeField] private Text craftCountText;
         [SerializeField] private Button craftBtn;
 
-        [Header("¸¡¶¯ÌáÊ¾")]
+        [Header("æµ®åŠ¨æç¤º")]
         [SerializeField] private Text tipText;
-        [SerializeField] private float tipDuration = 2f;   // 2ÃëÏûÊ§
-        [SerializeField] private float tipFloatDistance = 60f;  // ÉÏÆ®¾àÀë
+        [SerializeField] private float tipDuration = 2f;   // 2ç§’æ¶ˆå¤±
+        [SerializeField] private float tipFloatDistance = 60f;  // ä¸Šé£˜è·ç¦»
 
         private CraftController _controller;
         private ItemDao _itemDao = new ItemDao();
+        private bool _materialsReady;   // ææ–™åˆ—è¡¨ç›¸å…³å¼•ç”¨æ˜¯å¦å°±ç»ª
+        private bool _inventoryWarned;  // åŒç±» Warning åªæ‰“å°ä¸€æ¬¡
 
         private int _currentRecipeId;
         private int _craftCount = 1;
@@ -49,15 +51,33 @@ namespace View
         private EventBus.SubscriptionToken _bagChangedToken;
 
         /// <summary>
-        /// °ó¶¨¿ØÖÆÆ÷£¬³õÊ¼»¯ÁĞ±í
+        /// ç»‘å®šæ§åˆ¶å™¨ï¼Œåˆå§‹åŒ–åˆ—è¡¨
         /// </summary>
         public void SetController(CraftController controller)
         {
+            if (controller == null)
+            {
+                Debug.LogError("[CraftView] SetController ä¼ å…¥çš„ controller ä¸º null");
+                return;
+            }
+
             _controller = controller;
+
+            // ä¸€æ¬¡æ€§æ ¡éªŒææ–™åˆ—è¡¨ç›¸å…³å¼•ç”¨ï¼Œé¿å…åç»­æ¯æ¬¡åˆ·æ–°åå¤åˆ¤ç©º
+            if (materialItemPrefab == null || materialContainer == null)
+            {
+                Debug.LogError("[CraftView] materialItemPrefab æˆ– materialContainer æœªèµ‹å€¼ï¼Œææ–™åˆ—è¡¨ä¸å¯ç”¨");
+                _materialsReady = false;
+            }
+            else
+            {
+                _materialsReady = true;
+            }
+
             InitRecipeList();
             RegisterButtonEvents();
 
-            // ¶©ÔÄ£º±³°ü±ä»¯ ¡ú ÖÆ×÷Ãæ°å´ò¿ªÊ±×Ô¶¯Ë¢ĞÂ²ÄÁÏÊıÁ¿
+            // è®¢é˜…ï¼šèƒŒåŒ…å˜åŒ– â†’ åˆ¶ä½œé¢æ¿æ‰“å¼€æ—¶è‡ªåŠ¨åˆ·æ–°ææ–™æ•°é‡
             _bagChangedToken = EventBus.Subscribe(EventName.Bag_Changed, _ =>
             {
                 if (gameObject.activeSelf && _currentRecipeId != 0)
@@ -71,53 +91,69 @@ namespace View
         }
         private void OnEnable()
         {
-            // ÒÑ³õÊ¼»¯ÇÒÓĞÑ¡ÖĞÅä·½Ê±Ë¢ĞÂ
+            // å·²åˆå§‹åŒ–ä¸”æœ‰é€‰ä¸­é…æ–¹æ—¶åˆ·æ–°
             if (_controller != null && _currentRecipeId != 0)
             {
                 RefreshDetail();
             }
         }
 
-        // ×¢²á°´Å¥ÊÂ¼ş
+        // æ³¨å†ŒæŒ‰é’®äº‹ä»¶
         private void RegisterButtonEvents()
         {
+            if (minusBtn == null || plusBtn == null || craftBtn == null)
+            {
+                Debug.LogError("[CraftView] æŒ‰é’®å¼•ç”¨æœªå®Œæ•´èµ‹å€¼ï¼ˆminusBtn/plusBtn/craftBtnï¼‰ï¼Œæ— æ³•æ³¨å†Œç‚¹å‡»äº‹ä»¶");
+                return;
+            }
             minusBtn.onClick.AddListener(OnMinusCount);
             plusBtn.onClick.AddListener(OnPlusCount);
             craftBtn.onClick.AddListener(OnCraftButtonClick);
         }
 
-        // ³õÊ¼»¯×ó²àÅä·½ÁĞ±í
+        // åˆå§‹åŒ–å·¦ä¾§é…æ–¹åˆ—è¡¨
         private void InitRecipeList()
         {
+            if (recipeItemPrefab == null || recipeListParent == null)
+            {
+                Debug.LogError("[CraftView] recipeItemPrefab æˆ– recipeListParent æœªèµ‹å€¼ï¼Œæ— æ³•ç”Ÿæˆé…æ–¹åˆ—è¡¨");
+                return;
+            }
+
             Dictionary<int, RecipeInfo> allRecipes = _controller.GetAllRecipes();
+            if (allRecipes == null || allRecipes.Count == 0)
+            {
+                Debug.LogWarning("[CraftView] é…æ–¹æ•°æ®ä¸ºç©º");
+                return;
+            }
 
             foreach (var recipe in allRecipes.Values)
             {
                 CraftRecipeItem item = Instantiate(recipeItemPrefab, recipeListParent);
                 ItemInfo itemInfo = _itemDao.GetItemById(recipe.ResultItemId);
-                string name = itemInfo?.Name ?? "Î´ÖªÎïÆ·";
+                string name = itemInfo?.Name ?? "æœªçŸ¥ç‰©å“";
                 Sprite icon = LoadItemIcon(recipe.ResultItemId);
                 item.Init(recipe.RecipeId, name, icon, OnSelectRecipe);
                 _recipeItemList.Add(item);
             }
 
-            // Ä¬ÈÏÑ¡ÖĞµÚÒ»¸öÅä·½
-            if (allRecipes.Count > 0)
+            // é»˜è®¤é€‰ä¸­ç¬¬ä¸€ä¸ªé…æ–¹
+            foreach (var key in allRecipes.Keys)
             {
-                using var enumerator = allRecipes.Keys.GetEnumerator();
-                enumerator.MoveNext();
-                OnSelectRecipe(enumerator.Current);
+                OnSelectRecipe(key);
+                break;
             }
         }
 
-        // Ñ¡ÖĞÅä·½£¬Ë¢ĞÂÓÒ²àÈ«²¿ÏêÇé
+        // é€‰ä¸­é…æ–¹ï¼Œåˆ·æ–°å³ä¾§å…¨éƒ¨è¯¦æƒ…
         private void OnSelectRecipe(int recipeId)
         {
             _currentRecipeId = recipeId;
             _craftCount = 1;
-            craftCountText.text = $"ÖÆ×÷ ¡Á {_craftCount}";
+            if (craftCountText != null)
+                craftCountText.text = $"åˆ¶ä½œ Ã— {_craftCount}";
 
-            // ¸üĞÂÑ¡ÖĞ¸ßÁÁ
+            // æ›´æ–°é€‰ä¸­é«˜äº®
             foreach (var recipeItem in _recipeItemList)
             {
                 recipeItem.SetSelected(recipeItem.RecipeId == recipeId);
@@ -126,71 +162,108 @@ namespace View
             RefreshDetail();
         }
 
-        // Ë¢ĞÂÓÒ²àÈ«²¿ÏêÇé
+        // åˆ·æ–°å³ä¾§å…¨éƒ¨è¯¦æƒ…
         private void RefreshDetail()
         {
-            RecipeInfo recipe = _controller.GetAllRecipes()[_currentRecipeId];
+            if (_controller == null) return;
+
+            Dictionary<int, RecipeInfo> allRecipes = _controller.GetAllRecipes();
+            if (allRecipes == null || !allRecipes.TryGetValue(_currentRecipeId, out RecipeInfo recipe))
+            {
+                Debug.LogWarning($"[CraftView] é…æ–¹ä¸å­˜åœ¨ ID:{_currentRecipeId}");
+                return;
+            }
+
             ItemInfo itemInfo = _itemDao.GetItemById(recipe.ResultItemId);
 
-            // 1. ³ÉÆ·»ù´¡ĞÅÏ¢
-            resultIconImg.sprite = LoadItemIcon(recipe.ResultItemId);
-            itemNameText.text = itemInfo?.Name ?? "Î´ÖªÎïÆ·";
-            descText.text = itemInfo?.Desc ?? "";
+            // 1. æˆå“åŸºç¡€ä¿¡æ¯
+            if (resultIconImg != null)
+                resultIconImg.sprite = LoadItemIcon(recipe.ResultItemId);
+            if (itemNameText != null)
+                itemNameText.text = itemInfo?.Name ?? "æœªçŸ¥ç‰©å“";
+            if (descText != null)
+                descText.text = itemInfo?.Desc ?? "";
 
-            int ownResultCount = GameRoot.Instance.Inventory.GetItemTotalCount(recipe.ResultItemId);
-            ownCountText.text = $"ÓµÓĞ£º{ownResultCount}";
+            // GameRoot/Inventory å¯èƒ½å°šæœªåˆå§‹åŒ–ï¼Œåˆ¤ç©ºé™çº§
+            IInventory inventory = GameRoot.Instance?.Inventory;
+            if (inventory != null && ownCountText != null)
+            {
+                int ownResultCount = inventory.GetItemTotalCount(recipe.ResultItemId);
+                ownCountText.text = $"æ‹¥æœ‰ï¼š{ownResultCount}";
+            }
 
-            // 2. Ë¢ĞÂ²ÄÁÏÁĞ±í£¨´¹Ö±Éú³É£©
+            // 2. åˆ·æ–°ææ–™åˆ—è¡¨ï¼ˆå‚ç›´ç”Ÿæˆï¼‰
             RefreshMaterialList(recipe);
         }
 
-        // Ë¢ĞÂ²ÄÁÏÁĞ±í£ºÏú»Ù¾ÉµÄ£¬Éú³ÉĞÂµÄ
+        // åˆ·æ–°ææ–™åˆ—è¡¨ï¼šé”€æ¯æ—§çš„ï¼Œç”Ÿæˆæ–°çš„
         private void RefreshMaterialList(RecipeInfo recipe)
         {
-            // Çå¿Õ¾É²ÄÁÏÌõÄ¿
+            if (!_materialsReady) return;
+
+            IInventory inventory = GameRoot.Instance?.Inventory;
+            if (inventory == null)
+            {
+                if (!_inventoryWarned)
+                {
+                    _inventoryWarned = true;
+                    Debug.LogWarning("[CraftView] Inventory æœªå°±ç»ªï¼Œè·³è¿‡ææ–™æ•°é‡æ˜¾ç¤º");
+                }
+                return;
+            }
+
+            // æ¸…ç©ºæ—§ææ–™æ¡ç›®
             foreach (var item in _materialItemList)
             {
-                Destroy(item.gameObject);
+                if (item != null) Destroy(item.gameObject);
             }
             _materialItemList.Clear();
 
-            // Öğ¸öÉú³É²ÄÁÏĞĞ£¬´¹Ö±ÅÅÁĞÔÚÈİÆ÷Àï
+            // é€ä¸ªç”Ÿæˆææ–™è¡Œï¼Œå‚ç›´æ’åˆ—åœ¨å®¹å™¨é‡Œ
             foreach (var mat in recipe.Materials)
             {
                 CraftMaterialItem item = Instantiate(materialItemPrefab, materialContainer);
                 ItemInfo matInfo = _itemDao.GetItemById(mat.Key);
                 Sprite icon = LoadItemIcon(mat.Key);
 
-                int haveCount = GameRoot.Instance.Inventory.GetItemTotalCount(mat.Key);
-                int needCount = mat.Value * _craftCount; // ³ËÒÔÖÆ×÷ÊıÁ¿
+                int haveCount = inventory.GetItemTotalCount(mat.Key);
+                int needCount = mat.Value * _craftCount; // ä¹˜ä»¥åˆ¶ä½œæ•°é‡
 
-                item.SetData(icon, needCount, haveCount, matInfo?.Name ?? "Î´Öª²ÄÁÏ");
+                item.SetData(icon, needCount, haveCount, matInfo?.Name ?? "æœªçŸ¥ææ–™");
                 _materialItemList.Add(item);
             }
         }
 
-        // ¼õÉÙÖÆ×÷ÊıÁ¿
+        // å‡å°‘åˆ¶ä½œæ•°é‡
         private void OnMinusCount()
         {
             if (_craftCount > 1)
             {
                 _craftCount--;
-                craftCountText.text = $"ÖÆ×÷ ¡Á {_craftCount}";
-                RefreshDetail(); // Í¬²½Ë¢ĞÂ²ÄÁÏĞèÇó
+                if (craftCountText != null)
+                    craftCountText.text = $"åˆ¶ä½œ Ã— {_craftCount}";
+                RefreshDetail(); // åŒæ­¥åˆ·æ–°ææ–™éœ€æ±‚
             }
         }
 
-        // Ôö¼ÓÖÆ×÷ÊıÁ¿
+        // å¢åŠ åˆ¶ä½œæ•°é‡
         private void OnPlusCount()
         {
             _craftCount++;
-            craftCountText.text = $"ÖÆ×÷ ¡Á {_craftCount}";
-            RefreshDetail(); // Í¬²½Ë¢ĞÂ²ÄÁÏĞèÇó
+            if (craftCountText != null)
+                craftCountText.text = $"åˆ¶ä½œ Ã— {_craftCount}";
+            RefreshDetail(); // åŒæ­¥åˆ·æ–°ææ–™éœ€æ±‚
         }
 
-        // µã»÷ÖÆ×÷°´Å¥£¬×ª·¢¸øController´¦ÀíÒµÎñ
+        // ç‚¹å‡»åˆ¶ä½œæŒ‰é’®ï¼Œè½¬å‘ç»™Controllerå¤„ç†ä¸šåŠ¡
         private void OnCraftButtonClick()
         {
+            if (_controller == null)
+            {
+                Debug.LogWarning("[CraftView] åˆ¶ä½œæŒ‰é’®ç‚¹å‡»æ—¶ controller ä¸º null");
+                return;
+            }
+
             bool success = true;
             for (int i = 0; i < _craftCount; i++)
             {
@@ -203,27 +276,27 @@ namespace View
 
             if (success)
             {
-                RefreshDetail(); // ÖÆ×÷Íê³ÉË¢ĞÂËùÓĞÊı¾İ
+                RefreshDetail(); // åˆ¶ä½œå®Œæˆåˆ·æ–°æ‰€æœ‰æ•°æ®
             }
             else
             {
-                ShowTip("²ÄÁÏ²»×ã");
+                ShowTip("ææ–™ä¸è¶³");
             }
         }
 
-        // ¼ÓÔØÎïÆ·Í¼±ê
+        // åŠ è½½ç‰©å“å›¾æ ‡
         private Sprite LoadItemIcon(int itemId)
         {
             if (itemId == 0) return null;
             return Resources.Load<Sprite>($"ItemIcons/{itemId}");
         }
         /// <summary>
-        /// ÏÔÊ¾¸¡¶¯ÌáÊ¾£¨Ä¿Ç°½öÓÃÓÚ²ÄÁÏ²»×ã£©
+        /// æ˜¾ç¤ºæµ®åŠ¨æç¤ºï¼ˆç›®å‰ä»…ç”¨äºææ–™ä¸è¶³ï¼‰
         /// </summary>
         private void ShowTip(string msg)
         {
             if (tipText == null) return;
-            StopAllCoroutines();            // ·ÀÖ¹¶à¸öÌáÊ¾µş¼Ó
+            StopAllCoroutines();            // é˜²æ­¢å¤šä¸ªæç¤ºå åŠ 
             StartCoroutine(TipRoutine(msg));
         }
 
@@ -232,7 +305,7 @@ namespace View
             tipText.text = msg;
             tipText.gameObject.SetActive(true);
 
-            // ³õÊ¼£º¾ÓÖĞ¡¢È«Í¸Ã÷
+            // åˆå§‹ï¼šå±…ä¸­ã€å…¨é€æ˜
             Color c = tipText.color;
             c.a = 0f;
             tipText.color = c;
@@ -245,19 +318,19 @@ namespace View
                 elapsed += Time.deltaTime;
                 float t = elapsed / tipDuration;
 
-                // Ç° 0.3 Ãëµ­Èë£¬Ö®ºóµ­³ö
+                // å‰ 0.3 ç§’æ·¡å…¥ï¼Œä¹‹åæ·¡å‡º
                 float alpha = t < 0.15f ? t / 0.15f : 1f - (t - 0.15f) / 0.85f;
                 c.a = Mathf.Clamp01(alpha);
                 tipText.color = c;
 
-                // ÉÏÆ®
+                // ä¸Šé£˜
                 tipText.rectTransform.anchoredPosition = startPos + Vector3.up * (tipFloatDistance * t);
 
                 yield return null;
             }
 
             tipText.gameObject.SetActive(false);
-            tipText.rectTransform.anchoredPosition = startPos; // ¸´Î»
+            tipText.rectTransform.anchoredPosition = startPos; // å¤ä½
         }
     }
 }

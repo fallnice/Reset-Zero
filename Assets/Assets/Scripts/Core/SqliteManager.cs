@@ -4,7 +4,7 @@ using System.IO;
 
 namespace Core
 {
-    // Ö´ĞĞË³ĞòÉèÎª -100£¬È·±£ÔÚ GameRoot£¨Ä¬ÈÏ 0£©Ö®Ç°Íê³É Awake
+    // æ‰§è¡Œé¡ºåºè®¾ä¸º -100ï¼Œç¡®ä¿åœ¨ GameRootï¼ˆé»˜è®¤ 0ï¼‰ä¹‹å‰å®Œæˆ Awake
     [DefaultExecutionOrder(-100)]
     public class SqliteManager : MonoBehaviour
     {
@@ -12,6 +12,7 @@ namespace Core
 
         private SqliteConnection _connection;
         private string _runtimeDbPath;
+        private SqliteTransaction _currentTransaction;   // å½“å‰æ´»è·ƒäº‹åŠ¡ï¼ŒDAO å†™æ“ä½œè‡ªåŠ¨ç»‘å®š
 
         private void Awake()
         {
@@ -21,68 +22,128 @@ namespace Core
                 return;
             }
             Instance = this;
-            // DontDestroyOnLoad Ö»¶Ô¸ù¼¶ GameObject ÉúĞ§£¬ÏÈÍÑÀë¸¸¼¶
+            // DontDestroyOnLoad åªå¯¹æ ¹çº§ GameObject ç”Ÿæ•ˆï¼Œå…ˆè„±ç¦»çˆ¶çº§
             transform.SetParent(null);
             DontDestroyOnLoad(gameObject);
         }
 
-        public void Init()
+        /// <summary>
+        /// åˆå§‹åŒ–æ•°æ®åº“è¿æ¥ï¼Œè¿”å›æ˜¯å¦æˆåŠŸ
+        /// </summary>
+        public bool Init()
         {
-            if (_connection != null) return; // ÒÑ³õÊ¼»¯ÔòÌø¹ı
+            if (_connection != null) return true; // å·²åˆå§‹åŒ–
 
-            // ³Ö¾Ã»¯Â·¾¶£ºÖØÆôÓÎÏ·Êı¾İ²»¶ªÊ§
+            // æŒä¹…åŒ–è·¯å¾„ï¼šé‡å¯æ¸¸æˆæ•°æ®ä¸ä¸¢å¤±
             _runtimeDbPath = Path.Combine(Application.persistentDataPath, "game.db");
 
-            // Õï¶ÏÈÕÖ¾£º´òÓ¡Êµ¼ÊÂ·¾¶
-           // Debug.Log($"[SqliteManager] persistentDataPath = {Application.persistentDataPath}");
-            //Debug.Log($"[SqliteManager] ÔËĞĞÊ±Êı¾İ¿âÂ·¾¶ = {_runtimeDbPath}");
-            //Debug.Log($"[SqliteManager] ÔËĞĞÊ±¿âÊÇ·ñ´æÔÚ = {File.Exists(_runtimeDbPath)}");
-
+            // æºåº“æ ¡éªŒï¼šä¸å­˜åœ¨åˆ™æ— æ³•åˆå§‹åŒ–ï¼Œé¿å… File.Copy æŠ›å¼‚å¸¸
             string sourcePath = Path.Combine(Application.streamingAssetsPath, "game.db");
-            //Debug.Log($"[SqliteManager] Ô´Êı¾İ¿âÂ·¾¶ = {sourcePath}");
-            //Debug.Log($"[SqliteManager] Ô´¿âÊÇ·ñ´æÔÚ = {File.Exists(sourcePath)}");
-
-            // Ê×´ÎÆô¶¯¸´ÖÆ³õÊ¼ÅäÖÃ¿â
-            if (!File.Exists(_runtimeDbPath))
+            if (!File.Exists(sourcePath))
             {
-                //Debug.Log("[SqliteManager] ¸´ÖÆĞÂÊı¾İ¿â...");
-                File.Copy(sourcePath, _runtimeDbPath);
+                Debug.LogError($"[SqliteManager] æºæ•°æ®åº“ä¸å­˜åœ¨ï¼š{sourcePath}\n" +
+                               "è¯·å°†åˆå§‹åº“ game.db æ”¾å…¥ StreamingAssets ç›®å½•ï¼Œæˆ–ç¡®è®¤æ„å»ºæ—¶å·²åŒ…å«è¯¥æ–‡ä»¶ã€‚");
+                return false;
             }
 
-            _connection = new SqliteConnection($"Data Source={_runtimeDbPath}");
-            _connection.Open();
+            // é¦–æ¬¡å¯åŠ¨å¤åˆ¶åˆå§‹é…ç½®åº“åˆ°æŒä¹…åŒ–ç›®å½•
+            if (!File.Exists(_runtimeDbPath))
+            {
+                try
+                {
+                    File.Copy(sourcePath, _runtimeDbPath);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"[SqliteManager] å¤åˆ¶æ•°æ®åº“å¤±è´¥ï¼š{e.Message}");
+                    return false;
+                }
+            }
 
-            // Õï¶Ï£ºÁĞ³öËùÓĞ±í
-            //var reader = ExecuteQuery("SELECT name FROM sqlite_master WHERE type='table'");
-           // while (reader.Read())
-            //{
-              //  Debug.Log($"[SqliteManager] Êı¾İ¿âÖĞ°üº¬±í£º{reader.GetString(0)}");
-            //}
-            //reader.Close();
+            try
+            {
+                _connection = new SqliteConnection($"Data Source={_runtimeDbPath}");
+                _connection.Open();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[SqliteManager] æ‰“å¼€æ•°æ®åº“å¤±è´¥ï¼š{e.Message}");
+                return false;
+            }
+
+            return true;
         }
 
-        // Ö´ĞĞÔöÉ¾¸ÄSQL
+        // æ‰§è¡Œå¢åˆ æ”¹SQLï¼ˆè‡ªåŠ¨ç»‘å®šå½“å‰äº‹åŠ¡ï¼Œæ— äº‹åŠ¡æ—¶ç›´æ¥æäº¤ï¼‰
         public void ExecuteNonQuery(string sql)
         {
             using var cmd = new SqliteCommand(sql, _connection);
+            if (_currentTransaction != null)
+                cmd.Transaction = _currentTransaction;
             cmd.ExecuteNonQuery();
         }
 
-        // Ö´ĞĞ²éÑ¯SQL
+        // æ‰§è¡ŒæŸ¥è¯¢SQLï¼ˆè‡ªåŠ¨ç»‘å®šå½“å‰äº‹åŠ¡ï¼‰
         public SqliteDataReader ExecuteQuery(string sql)
         {
             using var cmd = new SqliteCommand(sql, _connection);
+            if (_currentTransaction != null)
+                cmd.Transaction = _currentTransaction;
             return cmd.ExecuteReader();
         }
 
-        // ¿ªÆôÊÂÎñ
-        public SqliteTransaction BeginTransaction()
+        /// <summary>
+        /// å¼€å¯äº‹åŠ¡â€”â€”ç»Ÿä¸€ç”± SqliteManager ç®¡ç†ï¼Œåç»­ ExecuteNonQuery/ExecuteQuery è‡ªåŠ¨ç»‘å®š
+        /// </summary>
+        public void BeginTransaction()
         {
-            return _connection.BeginTransaction();
+            if (_connection == null)
+            {
+                Debug.LogError("[SqliteManager] æ•°æ®åº“æœªåˆå§‹åŒ–ï¼Œæ— æ³•å¼€å¯äº‹åŠ¡");
+                return;
+            }
+            if (_currentTransaction != null)
+            {
+                Debug.LogWarning("[SqliteManager] å·²æœ‰æœªæäº¤çš„äº‹åŠ¡ï¼Œå¿½ç•¥é‡å¤å¼€å¯");
+                return;
+            }
+            _currentTransaction = _connection.BeginTransaction();
+        }
+
+        /// <summary>
+        /// æäº¤å½“å‰äº‹åŠ¡
+        /// </summary>
+        public void CommitTransaction()
+        {
+            if (_currentTransaction == null)
+            {
+                Debug.LogWarning("[SqliteManager] æ²¡æœ‰å¼€å¯çš„äº‹åŠ¡ï¼Œå¿½ç•¥æäº¤");
+                return;
+            }
+            _currentTransaction.Commit();
+            _currentTransaction.Dispose();
+            _currentTransaction = null;
+        }
+
+        /// <summary>
+        /// å›æ»šå½“å‰äº‹åŠ¡
+        /// </summary>
+        public void RollbackTransaction()
+        {
+            if (_currentTransaction == null)
+            {
+                Debug.LogWarning("[SqliteManager] æ²¡æœ‰å¼€å¯çš„äº‹åŠ¡ï¼Œå¿½ç•¥å›æ»š");
+                return;
+            }
+            _currentTransaction.Rollback();
+            _currentTransaction.Dispose();
+            _currentTransaction = null;
         }
 
         private void OnApplicationQuit()
         {
+            _currentTransaction?.Dispose();
+            _currentTransaction = null;
             _connection?.Close();
         }
     }

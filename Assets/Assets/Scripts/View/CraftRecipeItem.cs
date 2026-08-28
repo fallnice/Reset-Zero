@@ -4,7 +4,7 @@ using UnityEngine.UI;
 namespace View
 {
     /// <summary>
-    /// ×ó²àµ¥¸öÅä·½ÌõÄ¿
+    /// å·¦ä¾§å•ä¸ªé…æ–¹æ¡ç›®
     /// </summary>
     public class CraftRecipeItem : MonoBehaviour
     {
@@ -15,21 +15,30 @@ namespace View
 
         private int _recipeId;
         private System.Action<int> _onSelectCallback;
+        private bool _warned;   // åŒç±» Warning åªæ‰“å°ä¸€æ¬¡
         public int RecipeId { get; private set; }
 
         /// <summary>
-        /// ³õÊ¼»¯ÌõÄ¿Êı¾İ
+        /// åˆå§‹åŒ–æ¡ç›®æ•°æ®
         /// </summary>
         public void Init(int recipeId, string itemName, Sprite iconSprite, System.Action<int> onSelect)
         {
             RecipeId = recipeId;
             _recipeId = recipeId;
             if (icon != null) icon.sprite = iconSprite;
-            nameText.text = itemName;
+            if (nameText != null) nameText.text = itemName;
             _onSelectCallback = onSelect;
 
-            btn.onClick.RemoveAllListeners();
-            btn.onClick.AddListener(OnClick);
+            if (btn != null)
+            {
+                btn.onClick.RemoveAllListeners();
+                btn.onClick.AddListener(OnClick);
+            }
+            else if (!_warned)
+            {
+                _warned = true;
+                Debug.LogWarning("[CraftRecipeItem] btn æœªèµ‹å€¼ï¼Œé…æ–¹æ— æ³•ç‚¹å‡»");
+            }
         }
 
         private void OnClick()
@@ -38,7 +47,7 @@ namespace View
         }
 
         /// <summary>
-        /// ÉèÖÃÑ¡ÖĞ¿òÏÔÒş
+        /// è®¾ç½®é€‰ä¸­æ¡†æ˜¾éš
         /// </summary>
         public void SetSelected(bool isSelected)
         {

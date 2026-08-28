@@ -4,28 +4,39 @@ using UnityEngine.UI;
 namespace View
 {
     /// <summary>
-    /// µ¥¸ö²ÄÁÏÌõ¼şĞĞUI£º×óÍ¼±ê£¬ÖĞÊıÁ¿£¬ÓÒÃû³Æ
+    /// å•ä¸ªææ–™æ¡ä»¶è¡ŒUIï¼šå·¦å›¾æ ‡ï¼Œä¸­æ•°é‡ï¼Œå³åç§°
     /// </summary>
     public class CraftMaterialItem : MonoBehaviour
     {
         [SerializeField] private Image iconImg;
         [SerializeField] private Text countText;
         [SerializeField] private Text nameText;
+        private bool _warned;   // åŒç±» Warning åªæ‰“å°ä¸€æ¬¡
 
         /// <summary>
-        /// ÉèÖÃ²ÄÁÏÊı¾İ
+        /// è®¾ç½®ææ–™æ•°æ®
         /// </summary>
-        /// <param name="icon">Í¼±ê</param>
-        /// <param name="needCount">ĞèÇóÊıÁ¿</param>
-        /// <param name="haveCount">Íæ¼ÒÓµÓĞÊıÁ¿</param>
-        /// <param name="matName">²ÄÁÏÃû³Æ</param>
+        /// <param name="icon">å›¾æ ‡</param>
+        /// <param name="needCount">éœ€æ±‚æ•°é‡</param>
+        /// <param name="haveCount">ç©å®¶æ‹¥æœ‰æ•°é‡</param>
+        /// <param name="matName">ææ–™åç§°</param>
         public void SetData(Sprite icon, int needCount, int haveCount, string matName)
         {
+            if (iconImg == null || countText == null || nameText == null)
+            {
+                if (!_warned)
+                {
+                    _warned = true;
+                    Debug.LogWarning("[CraftMaterialItem] ç»„ä»¶å¼•ç”¨æœªå®Œæ•´èµ‹å€¼");
+                }
+                return;
+            }
+
             iconImg.sprite = icon;
             countText.text = $"{needCount} / {haveCount}";
             nameText.text = matName;
 
-            // ÓµÓĞ²»×ã±êºì
+            // æ‹¥æœ‰ä¸è¶³æ ‡çº¢
             countText.color = haveCount >= needCount ? Color.white : Color.red;
         }
     }
