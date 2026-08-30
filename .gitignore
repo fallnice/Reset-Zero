@@ -1,52 +1,32 @@
-# ===== Unity 自动生成的垃圾文件（禁止提交）=====
-/[Ll]ibrary/
-/[Tt]emp/
-/[Oo]bj/
-/[Bb]uild/
-/[Bb]uilds/
-/[Ll]ogs/
-/[Uu]ser[Ss]ettings/
-/[Mm]emoryCaptures/
-/[Rr]ecordings/
-
-# ===== 项目元数据（本地临时）=====
-*.csproj
-*.sln
-*.suo
-*.user
-*.userprefs
-*.pidb
-*.booproj
-*.svd
-*.pdb
-*.mdb
-*.opendb
-*.VC.db
-sysinfo.txt
-crashlytics-build.properties
-*.pidb.meta
-*.pdb.meta
-*.mdb.meta
-
-# ===== 构建产物 =====
-*.apk
-*.aab
-*.unitypackage
-*.app
-ExportedObj/
-
-# ===== IDE / 编辑器 =====
-.idea/
+# ===== Unity 本机缓存（不入库）=====
+Library/
+Temp/
+obj/
+Logs/
+Build/
+Builds/
+UserSettings/
+MemoryCaptures/
+Recordings/
 .vs/
 .vscode/
-*.DotSettings.user
-.consulo/
+.idea/
 
-# ===== 系统文件 =====
-Thumbs.db
-.DS_Store
-Desktop.ini
+# ===== 备份与旧拷贝（不入库）=====
+*.zip
+Reset-Zero/
 
-# ===== 重要：以下内容必须提交，不要忽略 =====
-# Assets/ 、Packages/ 、ProjectSettings/ 必须进版本管理
-# *.meta 必须进版本管理（Unity 资源 GUID 引用的命根子）
+# ===== IDE 生成文件（不入库，Unity 会重新生成）=====
+*.csproj
+*.sln
+.vsconfig
+
+# ===== 同步策略：只跟踪代码与文档 =====
+# 公司电脑无 Unity 环境，仅同步代码；美术/场景等资源仅本机维护
+# 先排除 Assets 下所有内容
+Assets/*
+# 再放行代码目录与顶层配置（含 .meta，保 GUID 稳定）
+!Assets/Scripts/
+!Assets/Scripts.meta
+!Assets/csc.rsp
+!Assets/csc.rsp.meta
