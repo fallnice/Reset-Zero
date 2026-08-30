@@ -2,6 +2,8 @@ using Core;
 using Controller;
 using UnityEngine;
 using View;
+using Role.Core;
+using Role.Input;
 
 public class GameRoot : MonoBehaviour
 {
@@ -12,6 +14,9 @@ public class GameRoot : MonoBehaviour
     public CraftController CraftController { get; private set; }
     public UIController UIController { get; private set; }
 
+    // UI 输入提供者——角色可能在 GameRoot 之后才初始化，延迟获取后缓存
+    private IUiInputProvider _uiInput;
+    private bool _uiInputMissingWarned;   // 同类 Warning 只打印一次
     private bool _initialized;             // 模块初始化是否成功（失败则 Update 不再处理输入）
 
     private void Awake()
@@ -92,8 +97,23 @@ public class GameRoot : MonoBehaviour
         // 初始化失败（如缺 SqliteManager）时不再处理输入，避免空引用
         if (!_initialized) return;
 
+        // 延迟获取 UI 输入提供者（角色可能在 GameRoot 之后才初始化，首次非 null 后缓存）
+        if (_uiInput == null)
+        {
+            _uiInput = FindObjectOfType<PlayerInputProvider>();
+            if (_uiInput == null)
+            {
+                if (!_uiInputMissingWarned)
+                {
+                    _uiInputMissingWarned = true;
+                    Debug.LogWarning("[GameRoot] 未找到 PlayerInputProvider，UI 快捷键暂不可用");
+                }
+                return;
+            }
+        }
+
         // I 键：开关背包面板
-        if (Input.GetKeyDown(KeyCode.I))
+        if (_uiInput.OpenBagPressed)
         {
             var bag = UIManager.Instance.GetPanel<BagView>();
             if (bag != null && bag.gameObject.activeSelf)
@@ -103,7 +123,7 @@ public class GameRoot : MonoBehaviour
         }
 
         // C 键：开关制作面板
-        if (Input.GetKeyDown(KeyCode.C))
+        if (_uiInput.OpenCraftPressed)
         {
             var craft = UIManager.Instance.GetPanel<CraftView>();
             if (craft != null && craft.gameObject.activeSelf)
@@ -113,13 +133,13 @@ public class GameRoot : MonoBehaviour
         }
 
         // Tab 键：背包/制作互斥切换
-        if (Input.GetKeyDown(KeyCode.Tab))
+        if (_uiInput.TogglePanelPressed)
         {
             UIController.ToggleBagAndCraft();
         }
 
         // ESC 键：关闭所有面板
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (_uiInput.CloseAllPressed)
         {
             UIController.CloseAllPanels();
         }

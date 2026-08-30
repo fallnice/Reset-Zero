@@ -27,6 +27,10 @@ namespace Role
         private float _pitch;   // 垂直俯仰角
         private Vector3 _smoothVelocity;
 
+        // 输入提供者——跨 MonoBehaviour 引用不在 Awake 缓存，LateUpdate 中延迟获取
+        private Role.Core.IInputProvider _inputProvider;
+        private bool _inputMissingWarned;   // 同类 Warning 只打印一次
+
         private void Start()
         {
             _yaw = target != null ? target.eulerAngles.y : 0f;
@@ -37,9 +41,25 @@ namespace Role
         {
             if (target == null) return;
 
-            // 鼠标移动控制旋转
-            _yaw   += UnityEngine.Input.GetAxis("Mouse X") * rotationSpeed;
-            _pitch -= UnityEngine.Input.GetAxis("Mouse Y") * rotationSpeed;
+            // 延迟获取输入提供者（首次非 null 后缓存）
+            if (_inputProvider == null)
+            {
+                _inputProvider = target.GetComponentInChildren<Role.Core.IInputProvider>();
+                if (_inputProvider == null)
+                {
+                    if (!_inputMissingWarned)
+                    {
+                        _inputMissingWarned = true;
+                        Debug.LogWarning("[CameraFollow] 未在角色身上找到 IInputProvider，相机无法旋转");
+                    }
+                    return;
+                }
+            }
+
+            // 鼠标/右摇杆输入控制旋转（统一走 Input System 的 Look action）
+            UnityEngine.Vector2 lookDelta = _inputProvider.LookDelta;
+            _yaw   += lookDelta.x * rotationSpeed;
+            _pitch -= lookDelta.y * rotationSpeed;
             _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
 
             // 计算相机目标位置（球面坐标）

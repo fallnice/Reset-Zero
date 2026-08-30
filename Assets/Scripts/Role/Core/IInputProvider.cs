@@ -12,6 +12,9 @@ namespace Role.Core
         /// <summary> 世界空间注视/瞄准方向 </summary>
         UnityEngine.Vector3 LookDirection { get; }
 
+        /// <summary> 本帧鼠标/右摇杆旋转增量（用于第三人称相机旋转，未归一化） </summary>
+        UnityEngine.Vector2 LookDelta { get; }
+
         /// <summary> 本帧是否按下了跳跃 </summary>
         bool JumpPressed { get; }
 

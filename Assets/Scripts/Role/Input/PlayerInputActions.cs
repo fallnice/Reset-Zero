@@ -80,6 +80,42 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""OpenBag"",
+                    ""type"": ""Button"",
+                    ""id"": ""a1b2c3d4-0001-4000-8000-000000000001"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""OpenCraft"",
+                    ""type"": ""Button"",
+                    ""id"": ""a1b2c3d4-0002-4000-8000-000000000002"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""TogglePanel"",
+                    ""type"": ""Button"",
+                    ""id"": ""a1b2c3d4-0003-4000-8000-000000000003"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""CloseAll"",
+                    ""type"": ""Button"",
+                    ""id"": ""a1b2c3d4-0004-4000-8000-000000000004"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -192,6 +228,50 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""action"": ""Interact"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b1b2c3d4-0001-4000-8000-000000000001"",
+                    ""path"": ""<Keyboard>/i"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""OpenBag"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b1b2c3d4-0002-4000-8000-000000000002"",
+                    ""path"": ""<Keyboard>/c"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""OpenCraft"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b1b2c3d4-0003-4000-8000-000000000003"",
+                    ""path"": ""<Keyboard>/tab"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""TogglePanel"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b1b2c3d4-0004-4000-8000-000000000004"",
+                    ""path"": ""<Keyboard>/escape"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CloseAll"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -206,6 +286,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         m_Player_PrimaryAction = m_Player.FindAction("PrimaryAction", throwIfNotFound: true);
         m_Player_Sprint = m_Player.FindAction("Sprint", throwIfNotFound: true);
         m_Player_Interact = m_Player.FindAction("Interact", throwIfNotFound: true);
+        m_Player_OpenBag = m_Player.FindAction("OpenBag", throwIfNotFound: true);
+        m_Player_OpenCraft = m_Player.FindAction("OpenCraft", throwIfNotFound: true);
+        m_Player_TogglePanel = m_Player.FindAction("TogglePanel", throwIfNotFound: true);
+        m_Player_CloseAll = m_Player.FindAction("CloseAll", throwIfNotFound: true);
     }
 
     public void Dispose()
@@ -273,6 +357,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
     private readonly InputAction m_Player_PrimaryAction;
     private readonly InputAction m_Player_Sprint;
     private readonly InputAction m_Player_Interact;
+    private readonly InputAction m_Player_OpenBag;
+    private readonly InputAction m_Player_OpenCraft;
+    private readonly InputAction m_Player_TogglePanel;
+    private readonly InputAction m_Player_CloseAll;
     public struct PlayerActions
     {
         private @PlayerInputActions m_Wrapper;
@@ -283,6 +371,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         public InputAction @PrimaryAction => m_Wrapper.m_Player_PrimaryAction;
         public InputAction @Sprint => m_Wrapper.m_Player_Sprint;
         public InputAction @Interact => m_Wrapper.m_Player_Interact;
+        public InputAction @OpenBag => m_Wrapper.m_Player_OpenBag;
+        public InputAction @OpenCraft => m_Wrapper.m_Player_OpenCraft;
+        public InputAction @TogglePanel => m_Wrapper.m_Player_TogglePanel;
+        public InputAction @CloseAll => m_Wrapper.m_Player_CloseAll;
         public InputActionMap Get() { return m_Wrapper.m_Player; }
         public void Enable() { Get().Enable(); }
         public void Disable() { Get().Disable(); }
@@ -310,6 +402,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Interact.started += instance.OnInteract;
             @Interact.performed += instance.OnInteract;
             @Interact.canceled += instance.OnInteract;
+            @OpenBag.started += instance.OnOpenBag;
+            @OpenBag.performed += instance.OnOpenBag;
+            @OpenBag.canceled += instance.OnOpenBag;
+            @OpenCraft.started += instance.OnOpenCraft;
+            @OpenCraft.performed += instance.OnOpenCraft;
+            @OpenCraft.canceled += instance.OnOpenCraft;
+            @TogglePanel.started += instance.OnTogglePanel;
+            @TogglePanel.performed += instance.OnTogglePanel;
+            @TogglePanel.canceled += instance.OnTogglePanel;
+            @CloseAll.started += instance.OnCloseAll;
+            @CloseAll.performed += instance.OnCloseAll;
+            @CloseAll.canceled += instance.OnCloseAll;
         }
 
         private void UnregisterCallbacks(IPlayerActions instance)
@@ -332,6 +436,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Interact.started -= instance.OnInteract;
             @Interact.performed -= instance.OnInteract;
             @Interact.canceled -= instance.OnInteract;
+            @OpenBag.started -= instance.OnOpenBag;
+            @OpenBag.performed -= instance.OnOpenBag;
+            @OpenBag.canceled -= instance.OnOpenBag;
+            @OpenCraft.started -= instance.OnOpenCraft;
+            @OpenCraft.performed -= instance.OnOpenCraft;
+            @OpenCraft.canceled -= instance.OnOpenCraft;
+            @TogglePanel.started -= instance.OnTogglePanel;
+            @TogglePanel.performed -= instance.OnTogglePanel;
+            @TogglePanel.canceled -= instance.OnTogglePanel;
+            @CloseAll.started -= instance.OnCloseAll;
+            @CloseAll.performed -= instance.OnCloseAll;
+            @CloseAll.canceled -= instance.OnCloseAll;
         }
 
         public void RemoveCallbacks(IPlayerActions instance)
@@ -357,5 +473,9 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         void OnPrimaryAction(InputAction.CallbackContext context);
         void OnSprint(InputAction.CallbackContext context);
         void OnInteract(InputAction.CallbackContext context);
+        void OnOpenBag(InputAction.CallbackContext context);
+        void OnOpenCraft(InputAction.CallbackContext context);
+        void OnTogglePanel(InputAction.CallbackContext context);
+        void OnCloseAll(InputAction.CallbackContext context);
     }
 }
