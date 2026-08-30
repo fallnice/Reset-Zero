@@ -16,9 +16,8 @@ namespace Controller
         /// </summary>
         public void Init()
         {
-            // 默认只显示背包面板
-            OpenBagPanel();
-            CloseCraftPanel();
+            // 默认全部关闭，进入游戏后由玩家通过快捷键（I/C/Tab）打开
+            CloseAllPanels();
         }
 
         // ─── 背包面板 ───────────────────────────────────────────
