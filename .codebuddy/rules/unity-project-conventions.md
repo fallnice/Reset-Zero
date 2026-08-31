@@ -30,6 +30,6 @@ enabled: true
 - 布尔字段用 `is/has/can` 前缀
 
 ## 目录规范
-- 脚本根目录 `D:/Learn/Assets/Assets/Scripts/`（对应 Unity 工程里的 `Assets/Scripts/`）
+- 脚本根目录 `D:/Learn/Assets/Scripts/`（对应 Unity 工程里的 `Assets/Scripts/`）
 - 现有子目录：Controller、Core、DAO、Interaction、Model、Role、View（更细的约定见「无 Unity 环境开发约束」规则）
 - 每个模块独立目录，脚本文件与类名一一对应

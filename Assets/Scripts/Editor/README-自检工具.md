@@ -14,6 +14,7 @@ Unity 工程里「**编译通过 ≠ 能跑**」。场景/配置类错误（管�
 
 | 检查 | 覆盖问题 | 实现 |
 | --- | --- | --- |
+| 静态自检 | 项目约定违规（Debug.Log、meta 缺失、硬编码查找等） | `static_check.ps1` 纯文本解析，**不需要 Unity.exe** |
 | 编译检查 | 代码编译错误（`error CS`） | 无头编译 + 读 Unity 日志 |
 | 场景自检 | 管理器缺失、组件缺失、序列化引用未赋值 | `SceneAudit.cs` 加载场景逐项检查 |
 
@@ -23,7 +24,8 @@ Unity 工程里「**编译通过 ≠ 能跑**」。场景/配置类错误（管�
 | --- | --- |
 | `Assets/Scripts/Editor/SceneAudit.cs` | 场景自检框架：检查器注册机制 + 内置 6 项检查 + 菜单/命令行入口 |
 | `Assets/Scripts/Editor/CompileCheck.cs` | 编译检查辅助：Unity.exe 路径探测 + 命令生成 + 菜单复制命令 |
-| `Tools/run_check.ps1` | 一键自检：先编译检查、再场景自检，汇总 PASS/FAIL |
+| `Tools/static_check.ps1` | 无 exe 静态自检：纯文本检查 .cs/.unity/.prefab，不依赖 Unity.exe |
+| `Tools/run_check.ps1` | 一键自检：静态检查 + 编译检查 + 场景自检，无 Unity 时自动降级 |
 
 ## 三、怎么用
 
@@ -33,6 +35,16 @@ Unity 工程里「**编译通过 ≠ 能跑**」。场景/配置类错误（管�
 > 误杀的事故。`run_check.ps1` 已内置检测：检测到编辑器打开会**中止**（退出码 3），
 > 请先保存并关闭编辑器再跑。`-Force` 可跳过该检查，但不推荐。
 > 手动跑命令行方式 B 时同理：跑之前先确认编辑器没开着本项目。
+
+### 无 Unity 环境（机器没装 Unity.exe）
+
+`run_check.ps1` 会自动降级：只跑静态自检，跳过编译/场景检查。也可单独跑静态自检：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Tools\static_check.ps1
+```
+
+结果文件 `%TEMP%\unity_static_audit.log`，末尾 `STATIC_AUDIT_RESULT: PASS/FAIL`。
 
 ### 方式 A：一键脚本（推荐）
 
@@ -69,6 +81,7 @@ Unity 编辑器菜单 `Tools/自检/复制编译检查命令`（或 `复制场�
 
 | 文件 | 内容 |
 | --- | --- |
+| `%TEMP%\unity_static_audit.log` | 静态自检结果。逐项 `[PASS]`/`[FAIL]`/`[SKIP]`/`[INFO]`，末尾 `STATIC_AUDIT_RESULT: PASS/FAIL` |
 | `%TEMP%\unity_compile_check.log` | Unity 完整日志。`error CS` 行 = 编译错误；末尾 `Exiting batchmode successfully now!` = 无致命错误 |
 | `%TEMP%\unity_scene_audit.log` | 逐场景逐检查项 `[PASS]`/`[FAIL]`，末尾 `SCENE_AUDIT_RESULT: PASS/FAIL` |
 
@@ -112,15 +125,16 @@ RegisterChecker("MyThing 存在", CheckMyThing);
 - 数据库用 `SqliteManager`（场景中持久化对象，`[DefaultExecutionOrder(-100)]`），
   事务统一走 `SqliteManager.BeginTransaction/Commit/Rollback`。
 
-## 七、待完善清单（公司模型接力点）
+## 七、待完善清单
 
-当前框架可跑，以下按优先级排列，属「到公司完善」的范围：
+当前框架可跑，以下按优先级排列：
 
-- [ ] 公司机器上验证 `run_check.ps1` 能跑通（重点：Unity 路径探测，必要时设 `UNITY_PATH`）
-- [ ] 加「角色预制体（Player.prefab）组件完整性」检查项（当前只查场景内引用）
+- [x] ~~无 exe 静态自检~~（2026-08-31 已补 `static_check.ps1`，无 Unity 机器也能跑）
+- [ ] 回家验证 `run_check.ps1` 有 Unity 时的三查齐全（静态 + 编译 + 场景）
+- [ ] 加「角色预制体（Player.prefab）组件完整性」检查项（可做进 `static_check.ps1` 纯文本解析）
 - [ ] 加「`Resources/ItemIcons` 图标是否齐全」检查项（按 `items` 表 ID 对照文件）
 - [ ] 把自检接入日常流程：改完代码 → 跑 `run_check.ps1` → 修 `[FAIL]` → 再跑
-- [ ] 视情况把自检封装进 `BagDebugMenu` 同级的常用工具（如 git 提交前自动跑）
+- [ ] 视情况把自检封装进 git 提交前自动跑
 
 ## 八、历史背景
 
