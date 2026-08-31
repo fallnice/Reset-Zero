@@ -93,51 +93,45 @@ namespace Core
         }
 
         /// <summary>
-        /// 开启事务——统一由 SqliteManager 管理，后续 ExecuteNonQuery/ExecuteQuery 自动绑定
+        /// 作用域事务：work 内的写操作自动绑定当前事务。
+        /// 正常执行则提交；抛异常则回滚并重新抛出；无论成功失败都会在 finally 中释放并清空事务，
+        /// 从机制上杜绝「忘提交/忘回滚」与「重复开启被忽略」导致的僵尸事务。
+        /// 若已在外层事务中（嵌套调用），直接复用外层事务，由最外层统一提交。
         /// </summary>
-        public void BeginTransaction()
+        public void RunInTransaction(System.Action work)
         {
+            if (work == null) return;
+
             if (_connection == null)
             {
-                Debug.LogError("[SqliteManager] 数据库未初始化，无法开启事务");
+                Debug.LogError("[SqliteManager] 数据库未初始化，事务降级为直接执行");
+                work();
                 return;
             }
+
+            // 嵌套：已在外层事务中，直接执行，由最外层决定提交/回滚
             if (_currentTransaction != null)
             {
-                Debug.LogWarning("[SqliteManager] 已有未提交的事务，忽略重复开启");
+                work();
                 return;
             }
+
             _currentTransaction = _connection.BeginTransaction();
-        }
-
-        /// <summary>
-        /// 提交当前事务
-        /// </summary>
-        public void CommitTransaction()
-        {
-            if (_currentTransaction == null)
+            try
             {
-                Debug.LogWarning("[SqliteManager] 没有开启的事务，忽略提交");
-                return;
+                work();
+                _currentTransaction.Commit();
             }
-            _currentTransaction.Commit();
-            _currentTransaction.Dispose();
-            _currentTransaction = null;
-        }
-
-        /// <summary>
-        /// 回滚当前事务
-        /// </summary>
-        public void RollbackTransaction()
-        {
-            if (_currentTransaction == null)
+            catch
             {
-                Debug.LogWarning("[SqliteManager] 没有开启的事务，忽略回滚");
-                return;
+                _currentTransaction.Rollback();
+                throw;
             }
-            _currentTransaction.Rollback();
-            _currentTransaction.Dispose();
-            _currentTransaction = null;
+            finally
+            {
+                _currentTransaction.Dispose();
+                _currentTransaction = null;
+            }
         }
 
         private void OnApplicationQuit()

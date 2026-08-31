@@ -123,7 +123,8 @@ RegisterChecker("MyThing 存在", CheckMyThing);
   且勾选 Generate C# Class，则会**整体重新生成**该 `.cs`，注意别覆盖手写部分。
 - 不要动 `GameRoot` 的模块初始化顺序；场景缺东西时游戏用判空降级而非崩溃。
 - 数据库用 `SqliteManager`（场景中持久化对象，`[DefaultExecutionOrder(-100)]`），
-  事务统一走 `SqliteManager.BeginTransaction/Commit/Rollback`。
+  事务统一走 `SqliteManager.RunInTransaction(Action)`：作用域事务，正常提交、异常回滚、
+  无论成败都在 finally 释放清空，杜绝僵尸事务。
 
 ## 七、待完善清单
 

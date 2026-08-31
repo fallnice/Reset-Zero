@@ -29,7 +29,7 @@ namespace Controller
         }
 
         /// <summary>
-        /// 执行制作
+        /// 执行制作（原子操作由背包层保证：扣材料 + 加成品，内存与数据库一致提交）
         /// </summary>
         public bool DoCraft(int recipeId)
         {
@@ -39,51 +39,12 @@ namespace Controller
                 return false;
             }
 
-            // 1. 校验材料
-            foreach (var mat in recipe.Materials)
+            if (!_inventory.TryCraft(recipe, out string failReason))
             {
-                int have = _inventory.GetItemTotalCount(mat.Key);
-                if (have < mat.Value)
-                {
-                    Debug.LogWarning($"材料不足 ID:{mat.Key} 拥有:{have} 需要:{mat.Value}");
-                    return false;
-                }
-            }
-
-            // 2. 预检背包空间：避免事务中途 AddItem 失败导致内存/数据库不一致
-            if (!_inventory.CanAddItem(recipe.ResultItemId, recipe.ResultCount))
-            {
-                Debug.LogWarning("制作失败：背包空间不足");
+                Debug.LogWarning($"制作失败 配方ID:{recipeId} 原因:{failReason}");
                 return false;
             }
-
-            // 3. 事务保证原子性（SqliteManager 统一管理，DAO 写操作自动绑定当前事务）
-            SqliteManager.Instance.BeginTransaction();
-            try
-            {
-                // 扣材料
-                foreach (var mat in recipe.Materials)
-                {
-                    _inventory.RemoveItem(mat.Key, mat.Value);
-                }
-
-                // 加成品（空间已预检，正常情况必成功；仍做防御检查）
-                if (!_inventory.AddItem(recipe.ResultItemId, recipe.ResultCount))
-                {
-                    SqliteManager.Instance.RollbackTransaction();
-                    Debug.LogWarning("制作失败：放入成品失败");
-                    return false;
-                }
-
-                SqliteManager.Instance.CommitTransaction();
-                return true;
-            }
-            catch (System.Exception e)
-            {
-                SqliteManager.Instance.RollbackTransaction();
-                Debug.LogError("制作异常：" + e.Message);
-                return false;
-            }
+            return true;
         }
     }
 }

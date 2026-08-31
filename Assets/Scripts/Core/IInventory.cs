@@ -1,3 +1,5 @@
+using Model;
+
 namespace Core
 {
     /// <summary>
@@ -18,5 +20,8 @@ namespace Core
 
         /// <summary>获取物品总持有数量</summary>
         int GetItemTotalCount(int itemId);
+
+        /// <summary>原子制作：扣材料 + 加成品，内存与数据库一致提交；失败时两者都不变</summary>
+        bool TryCraft(RecipeInfo recipe, out string failReason);
     }
 }
