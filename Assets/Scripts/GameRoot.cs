@@ -12,6 +12,7 @@ public class GameRoot : MonoBehaviour
     public BagController BagController { get; private set; }
     public IInventory Inventory => BagController;  // 对外暴露接口，联机时可替换实现
     public CraftController CraftController { get; private set; }
+    public BonusController BonusController { get; private set; }
     public UIController UIController { get; private set; }
 
     // UI 输入提供者——角色可能在 GameRoot 之后才初始化，延迟获取后缓存
@@ -60,6 +61,9 @@ public class GameRoot : MonoBehaviour
 
         CraftController = new CraftController();
         CraftController.Init(BagController);
+
+        BonusController = new BonusController();
+        BonusController.Init(BagController);
 
         // 3. 查找并注册 UI 面板（场景中可能缺失，逐个判空降级）
         BagView bagView = FindObjectOfType<BagView>(true);
