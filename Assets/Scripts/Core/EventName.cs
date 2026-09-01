@@ -33,5 +33,11 @@ namespace Core
         // ===== 交互系统 =====
         public const string Interaction_TargetChanged = "interaction_target_changed"; // (string prompt) 目标变化，null 表示无目标
         public const string Interaction_Performed     = "interaction_performed";      // (IInteractable target) 交互触发
+
+        // ===== 武器/装备系统 =====
+        public const string Weapon_Equipped = "weapon_equipped"; // (oldWeapon, newWeapon) 武器切换完成
+
+        // ===== 加成道具 =====
+        public const string Bonus_Used = "bonus_used"; // (itemId) 加成道具使用成功
     }
 }
