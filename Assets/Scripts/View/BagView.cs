@@ -2,6 +2,7 @@ using Controller;
 using Core;
 using Dao;
 using Model;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,6 +19,8 @@ namespace View
         [SerializeField] private Transform gridParent;   // 格子父节点（Grid Layout Group）
         [Header("背包容量")]
         [SerializeField] private Text capacityText;
+        [Header("使用按钮（选中加成道具时显示）")]
+        [SerializeField] private Button useBtn;
 
         private BagController _controller;
         private readonly List<BagSlotItem> _slotItemList = new List<BagSlotItem>();
@@ -25,6 +28,23 @@ namespace View
         private EventBus.SubscriptionToken _bagChangedToken;
         private bool _slotsInited;      // 格子是否已生成，防止重复
         private bool _refreshWarned;    // 同类 Warning 只打印一次
+        private int _selectedIndex = -1; // 当前选中格子索引，-1=未选中
+
+        /// <summary>选中事件：参数为选中格子索引（-1=取消选中）。供「使用」按钮等外部订阅</summary>
+        public event Action<int> SlotSelected;
+        /// <summary>当前选中格子索引（-1=未选中）</summary>
+        public int SelectedIndex => _selectedIndex;
+        /// <summary>当前选中格子的物品ID（未选中或越界返回0）</summary>
+        public int SelectedItemId
+        {
+            get
+            {
+                if (_selectedIndex < 0) return 0;
+                var slots = _controller?.GetAllSlots();
+                if (slots == null || _selectedIndex >= slots.Count) return 0;
+                return slots[_selectedIndex].ItemId;
+            }
+        }
 
         /// <summary>
         /// 绑定控制器，初始化30个格子
@@ -40,6 +60,8 @@ namespace View
             _controller = controller;
             InitSlots();
             RefreshUI();
+            RegisterUseButton();
+            RefreshUseButton();
 
             // 订阅：背包变化 → 自动刷新 UI
             _bagChangedToken = EventBus.Subscribe(EventName.Bag_Changed, _ => RefreshUI());
@@ -48,6 +70,11 @@ namespace View
         private void OnDestroy()
         {
             _bagChangedToken?.Dispose();
+            if (useBtn != null) useBtn.onClick.RemoveListener(OnUseButtonClick);
+            foreach (var slot in _slotItemList)
+            {
+                slot.SlotClicked -= HandleSlotClicked;
+            }
         }
 
         // 生成30个空格子（只执行一次，防止重复生成）
@@ -70,6 +97,8 @@ namespace View
             for (int i = 0; i < 30; i++)
             {
                 BagSlotItem slot = Instantiate(slotPrefab, gridParent);
+                slot.SetIndex(i);
+                slot.SlotClicked += HandleSlotClicked;
                 _slotItemList.Add(slot);
             }
         }
@@ -103,6 +132,12 @@ namespace View
                 string itemName = itemInfo?.Name ?? "";
                 Sprite icon = LoadItemIcon(data.ItemId);
                 _slotItemList[i].SetData(data.ItemId, data.ItemCount, icon, itemName);
+
+                // 数据刷新后格子变空 → 自动取消选中
+                if (data.ItemId == 0 && i == _selectedIndex)
+                {
+                    SelectSlot(-1);
+                }
             }
 
             // 容量文本在循环外只更新一次
@@ -120,6 +155,92 @@ namespace View
             if (itemId == 0) return null;
             Sprite icon = Resources.Load<Sprite>($"ItemIcons/{itemId}");
             return icon;
+        }
+
+        /// <summary>
+        /// 格子点击回调：有物品则选中，空格子则清除选中
+        /// </summary>
+        private void HandleSlotClicked(BagSlotItem slot)
+        {
+            var slots = _controller?.GetAllSlots();
+            if (slots == null || slot.Index < 0 || slot.Index >= slots.Count) return;
+
+            if (slots[slot.Index].ItemId == 0)
+            {
+                SelectSlot(-1);
+                return;
+            }
+            SelectSlot(slot.Index);
+        }
+
+        /// <summary>
+        /// 设置选中格子（-1=取消选中）：维护高亮并广播选中事件
+        /// </summary>
+        public void SelectSlot(int index)
+        {
+            if (_selectedIndex == index) return;
+
+            // 清除旧选中高亮
+            if (_selectedIndex >= 0 && _selectedIndex < _slotItemList.Count)
+            {
+                _slotItemList[_selectedIndex].SetSelected(false);
+            }
+
+            _selectedIndex = index;
+
+            // 设置新选中高亮
+            if (index >= 0 && index < _slotItemList.Count)
+            {
+                _slotItemList[index].SetSelected(true);
+            }
+
+            SlotSelected?.Invoke(index);
+            RefreshUseButton();
+        }
+
+        // 注册「使用」按钮点击事件
+        private void RegisterUseButton()
+        {
+            if (useBtn == null)
+            {
+                Debug.LogWarning("[BagView] useBtn 未赋值，「使用」功能不可用");
+                return;
+            }
+            useBtn.onClick.AddListener(OnUseButtonClick);
+        }
+
+        // 点击「使用」：把选中的加成道具用掉一个
+        private void OnUseButtonClick()
+        {
+            int itemId = SelectedItemId;
+            if (itemId == 0)
+            {
+                Debug.LogWarning("[BagView] 未选中物品，无法使用");
+                return;
+            }
+
+            if (GameRoot.Instance?.BonusController == null)
+            {
+                Debug.LogWarning("[BagView] BonusController 未初始化，无法使用物品");
+                return;
+            }
+
+            // 使用成功后 RemoveItem 会广播 Bag_Changed → RefreshUI → 自动刷新选中与按钮状态
+            if (!GameRoot.Instance.BonusController.UseItem(itemId))
+            {
+                Debug.LogWarning($"[BagView] 使用物品失败 ID:{itemId}（数量不足或非加成道具？）");
+            }
+        }
+
+        // 刷新「使用」按钮显隐：选中且为加成道具才显示
+        private void RefreshUseButton()
+        {
+            if (useBtn == null) return;
+            int itemId = SelectedItemId;
+            bool show = itemId != 0
+                && GameRoot.Instance?.BonusController != null
+                && GameRoot.Instance.BonusController.IsBonusItem(itemId);
+            useBtn.gameObject.SetActive(show);
         }
     }
 }
