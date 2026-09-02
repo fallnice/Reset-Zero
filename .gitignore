@@ -12,6 +12,9 @@ Recordings/
 .vscode/
 .idea/
 
+# ===== CodeBuddy 本地工作记忆（不入库）=====
+.codebuddy/memory/
+
 # ===== 备份与旧拷贝（不入库）=====
 *.zip
 Reset-Zero/
