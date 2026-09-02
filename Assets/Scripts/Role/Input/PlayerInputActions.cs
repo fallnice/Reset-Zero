@@ -55,9 +55,36 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""initialStateCheck"": false
                 },
                 {
-                    ""name"": ""PrimaryAction"",
+                    ""name"": ""Attack"",
                     ""type"": ""Button"",
                     ""id"": ""139f7d7f-99e6-41c9-a940-b835743fc306"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""SelectPrimary"",
+                    ""type"": ""Button"",
+                    ""id"": ""c2d1e3f4-1001-4000-8000-000000000001"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""SelectSecondary"",
+                    ""type"": ""Button"",
+                    ""id"": ""c2d1e3f4-1002-4000-8000-000000000002"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""SelectMelee"",
+                    ""type"": ""Button"",
+                    ""id"": ""c2d1e3f4-1003-4000-8000-000000000003"",
                     ""expectedControlType"": ""Button"",
                     ""processors"": """",
                     ""interactions"": """",
@@ -192,7 +219,40 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
-                    ""action"": ""PrimaryAction"",
+                    ""action"": ""Attack"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d2e1f3a4-1001-4000-8000-000000000001"",
+                    ""path"": ""<Keyboard>/digit1"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectPrimary"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d2e1f3a4-1002-4000-8000-000000000002"",
+                    ""path"": ""<Keyboard>/digit2"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectSecondary"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d2e1f3a4-1003-4000-8000-000000000003"",
+                    ""path"": ""<Keyboard>/digit3"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectMelee"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 },
@@ -283,7 +343,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         m_Player_Move = m_Player.FindAction("Move", throwIfNotFound: true);
         m_Player_Look = m_Player.FindAction("Look", throwIfNotFound: true);
         m_Player_Jump = m_Player.FindAction("Jump", throwIfNotFound: true);
-        m_Player_PrimaryAction = m_Player.FindAction("PrimaryAction", throwIfNotFound: true);
+        m_Player_Attack = m_Player.FindAction("Attack", throwIfNotFound: true);
+        m_Player_SelectPrimary = m_Player.FindAction("SelectPrimary", throwIfNotFound: true);
+        m_Player_SelectSecondary = m_Player.FindAction("SelectSecondary", throwIfNotFound: true);
+        m_Player_SelectMelee = m_Player.FindAction("SelectMelee", throwIfNotFound: true);
         m_Player_Sprint = m_Player.FindAction("Sprint", throwIfNotFound: true);
         m_Player_Interact = m_Player.FindAction("Interact", throwIfNotFound: true);
         m_Player_OpenBag = m_Player.FindAction("OpenBag", throwIfNotFound: true);
@@ -354,7 +417,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
     private readonly InputAction m_Player_Move;
     private readonly InputAction m_Player_Look;
     private readonly InputAction m_Player_Jump;
-    private readonly InputAction m_Player_PrimaryAction;
+    private readonly InputAction m_Player_Attack;
+    private readonly InputAction m_Player_SelectPrimary;
+    private readonly InputAction m_Player_SelectSecondary;
+    private readonly InputAction m_Player_SelectMelee;
     private readonly InputAction m_Player_Sprint;
     private readonly InputAction m_Player_Interact;
     private readonly InputAction m_Player_OpenBag;
@@ -368,7 +434,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         public InputAction @Move => m_Wrapper.m_Player_Move;
         public InputAction @Look => m_Wrapper.m_Player_Look;
         public InputAction @Jump => m_Wrapper.m_Player_Jump;
-        public InputAction @PrimaryAction => m_Wrapper.m_Player_PrimaryAction;
+        public InputAction @Attack => m_Wrapper.m_Player_Attack;
+        public InputAction @SelectPrimary => m_Wrapper.m_Player_SelectPrimary;
+        public InputAction @SelectSecondary => m_Wrapper.m_Player_SelectSecondary;
+        public InputAction @SelectMelee => m_Wrapper.m_Player_SelectMelee;
         public InputAction @Sprint => m_Wrapper.m_Player_Sprint;
         public InputAction @Interact => m_Wrapper.m_Player_Interact;
         public InputAction @OpenBag => m_Wrapper.m_Player_OpenBag;
@@ -393,9 +462,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Jump.started += instance.OnJump;
             @Jump.performed += instance.OnJump;
             @Jump.canceled += instance.OnJump;
-            @PrimaryAction.started += instance.OnPrimaryAction;
-            @PrimaryAction.performed += instance.OnPrimaryAction;
-            @PrimaryAction.canceled += instance.OnPrimaryAction;
+            @Attack.started += instance.OnAttack;
+            @Attack.performed += instance.OnAttack;
+            @Attack.canceled += instance.OnAttack;
+            @SelectPrimary.started += instance.OnSelectPrimary;
+            @SelectPrimary.performed += instance.OnSelectPrimary;
+            @SelectPrimary.canceled += instance.OnSelectPrimary;
+            @SelectSecondary.started += instance.OnSelectSecondary;
+            @SelectSecondary.performed += instance.OnSelectSecondary;
+            @SelectSecondary.canceled += instance.OnSelectSecondary;
+            @SelectMelee.started += instance.OnSelectMelee;
+            @SelectMelee.performed += instance.OnSelectMelee;
+            @SelectMelee.canceled += instance.OnSelectMelee;
             @Sprint.started += instance.OnSprint;
             @Sprint.performed += instance.OnSprint;
             @Sprint.canceled += instance.OnSprint;
@@ -427,9 +505,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Jump.started -= instance.OnJump;
             @Jump.performed -= instance.OnJump;
             @Jump.canceled -= instance.OnJump;
-            @PrimaryAction.started -= instance.OnPrimaryAction;
-            @PrimaryAction.performed -= instance.OnPrimaryAction;
-            @PrimaryAction.canceled -= instance.OnPrimaryAction;
+            @Attack.started -= instance.OnAttack;
+            @Attack.performed -= instance.OnAttack;
+            @Attack.canceled -= instance.OnAttack;
+            @SelectPrimary.started -= instance.OnSelectPrimary;
+            @SelectPrimary.performed -= instance.OnSelectPrimary;
+            @SelectPrimary.canceled -= instance.OnSelectPrimary;
+            @SelectSecondary.started -= instance.OnSelectSecondary;
+            @SelectSecondary.performed -= instance.OnSelectSecondary;
+            @SelectSecondary.canceled -= instance.OnSelectSecondary;
+            @SelectMelee.started -= instance.OnSelectMelee;
+            @SelectMelee.performed -= instance.OnSelectMelee;
+            @SelectMelee.canceled -= instance.OnSelectMelee;
             @Sprint.started -= instance.OnSprint;
             @Sprint.performed -= instance.OnSprint;
             @Sprint.canceled -= instance.OnSprint;
@@ -470,7 +557,10 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         void OnMove(InputAction.CallbackContext context);
         void OnLook(InputAction.CallbackContext context);
         void OnJump(InputAction.CallbackContext context);
-        void OnPrimaryAction(InputAction.CallbackContext context);
+        void OnAttack(InputAction.CallbackContext context);
+        void OnSelectPrimary(InputAction.CallbackContext context);
+        void OnSelectSecondary(InputAction.CallbackContext context);
+        void OnSelectMelee(InputAction.CallbackContext context);
         void OnSprint(InputAction.CallbackContext context);
         void OnInteract(InputAction.CallbackContext context);
         void OnOpenBag(InputAction.CallbackContext context);

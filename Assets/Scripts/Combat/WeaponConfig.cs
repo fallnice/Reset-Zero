@@ -18,6 +18,11 @@ namespace Combat
         [Header("数值")]
         [Min(0f)] public float damage;
         [Min(0f)] public float range;   // 近战=攻击半径，枪械=射程
+        [Min(0.01f)] public float attackInterval = 0.5f; // 两次有效攻击之间的基础间隔（秒）
+
+        [Header("远程武器")]
+        [Tooltip("勾选后按住攻击键会按 attackInterval 连续射击；近战武器忽略此项")]
+        public bool isAutomatic;
 
         [Header("表现层（回家后填）")]
         public GameObject modelPrefab;  // 武器模型，挂到右手挂点

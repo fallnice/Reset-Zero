@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using Combat;
 using Core;
+using Role;
 using Role.Controllers;
 using Role.Core;   // Blackboard
 using UnityEditor;
@@ -68,11 +69,19 @@ namespace EditorTools
 
             WeaponConfig weapon = equipment.CurrentWeapon;
             string weaponName = weapon == null ? "（空手）" : weapon.weaponName;
+            string fireMode = equipment.UsesContinuousAttackInput ? "全自动" : "单次/半自动";
+            CharacterRoot character = Object.FindObjectOfType<CharacterRoot>(true);
+            string upperBody = character?.upperBodySM == null
+                ? "未初始化"
+                : $"{character.upperBodySM.CurrentMode}（抑制={character.upperBodySM.IsSuppressed}）";
 
             Debug.Log(
-                $"[战斗调试] 当前槽位={equipment.CurrentSlot} 武器={weaponName}\n" +
+                $"[战斗调试] 当前槽位={equipment.CurrentSlot} 武器={weaponName} 模式={fireMode}\n" +
+                $"UpperBody={upperBody}\n" +
                 $"攻击倍率={Blackboard.Get(CombatKeys.AttackMultiplier, 1f):0.##}\n" +
                 $"近战攻速倍率={Blackboard.Get(CombatKeys.MeleeAttackSpeedMultiplier, 1f):0.##}\n" +
+                $"当前攻击间隔={equipment.CurrentAttackInterval:0.###}s " +
+                $"剩余冷却={equipment.AttackCooldownRemaining:0.###}s\n" +
                 $"是否切换中={equipment.IsSwitching} 是否可攻击={equipment.CanAttack}");
         }
 

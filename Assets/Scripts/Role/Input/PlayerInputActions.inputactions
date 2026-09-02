@@ -33,9 +33,36 @@
                     "initialStateCheck": false
                 },
                 {
-                    "name": "PrimaryAction",
+                    "name": "Attack",
                     "type": "Button",
                     "id": "139f7d7f-99e6-41c9-a940-b835743fc306",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "SelectPrimary",
+                    "type": "Button",
+                    "id": "c2d1e3f4-1001-4000-8000-000000000001",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "SelectSecondary",
+                    "type": "Button",
+                    "id": "c2d1e3f4-1002-4000-8000-000000000002",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "SelectMelee",
+                    "type": "Button",
+                    "id": "c2d1e3f4-1003-4000-8000-000000000003",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -170,7 +197,40 @@
                     "interactions": "",
                     "processors": "",
                     "groups": "",
-                    "action": "PrimaryAction",
+                    "action": "Attack",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "d2e1f3a4-1001-4000-8000-000000000001",
+                    "path": "<Keyboard>/digit1",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectPrimary",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "d2e1f3a4-1002-4000-8000-000000000002",
+                    "path": "<Keyboard>/digit2",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectSecondary",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "d2e1f3a4-1003-4000-8000-000000000003",
+                    "path": "<Keyboard>/digit3",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectMelee",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },

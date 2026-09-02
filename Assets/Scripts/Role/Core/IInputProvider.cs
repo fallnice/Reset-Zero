@@ -18,8 +18,20 @@ namespace Role.Core
         /// <summary> 本帧是否按下了跳跃 </summary>
         bool JumpPressed { get; }
 
-        /// <summary> 本帧是否按下了射击/使用 </summary>
-        bool ActionPressed { get; }
+        /// <summary> 本帧是否按下攻击键（边缘触发，按下当帧有效） </summary>
+        bool AttackPressedThisFrame { get; }
+
+        /// <summary> 攻击键是否持续按住（全自动武器使用） </summary>
+        bool AttackHeld { get; }
+
+        /// <summary> 本帧是否选择主武器槽（数字键 1） </summary>
+        bool SelectPrimaryPressedThisFrame { get; }
+
+        /// <summary> 本帧是否选择副武器槽（数字键 2） </summary>
+        bool SelectSecondaryPressedThisFrame { get; }
+
+        /// <summary> 本帧是否选择近战槽（数字键 3） </summary>
+        bool SelectMeleePressedThisFrame { get; }
 
         /// <summary> 本帧是否按下了交互键（边缘触发，按下当帧有效） </summary>
         bool InteractPressed { get; }

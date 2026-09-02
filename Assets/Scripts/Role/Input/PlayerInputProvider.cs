@@ -16,7 +16,11 @@ namespace Role.Input
         private Vector2 _lookInput;
         private bool    _jumpPressedThisFrame;   // 边缘触发：按下当帧有效
         private bool    _jumpHeld;               // 持续状态
-        private bool    _actionPressed;
+        private bool    _attackPressedThisFrame;
+        private bool    _attackHeld;
+        private bool    _selectPrimaryPressedThisFrame;
+        private bool    _selectSecondaryPressedThisFrame;
+        private bool    _selectMeleePressedThisFrame;
         private bool    _interactPressedThisFrame;
         private bool    _sprintHeld;
         private bool    _openBagPressedThisFrame;     // 边缘触发：按下当帧有效
@@ -55,12 +59,22 @@ namespace Role.Input
 
         public Vector2 LookDelta => _lookInput;
 
-        public bool JumpPressed  => _jumpPressedThisFrame;
-        public bool IsJumpHeld   => _jumpHeld;
-        public bool ActionPressed => _actionPressed;
+        public bool JumpPressed => _jumpPressedThisFrame;
+        public bool IsJumpHeld => _jumpHeld;
+        public bool AttackPressedThisFrame => _attackPressedThisFrame;
+        public bool AttackHeld => _attackHeld;
+        public bool SelectPrimaryPressedThisFrame => _selectPrimaryPressedThisFrame;
+        public bool SelectSecondaryPressedThisFrame => _selectSecondaryPressedThisFrame;
+        public bool SelectMeleePressedThisFrame => _selectMeleePressedThisFrame;
         public bool InteractPressed => _interactPressedThisFrame;
         public bool SprintPressed => _sprintHeld;
-        public bool HasAnyInput   => _moveInput.sqrMagnitude > 0.01f || _jumpPressedThisFrame || _actionPressed || _interactPressedThisFrame;
+        public bool HasAnyInput => _moveInput.sqrMagnitude > 0.01f
+            || _jumpPressedThisFrame
+            || _attackHeld
+            || _interactPressedThisFrame
+            || _selectPrimaryPressedThisFrame
+            || _selectSecondaryPressedThisFrame
+            || _selectMeleePressedThisFrame;
 
         // ===== IUiInputProvider 实现 =====
 
@@ -86,6 +100,7 @@ namespace Role.Input
         {
             _inputActions.Player.RemoveCallbacks(this);
             _inputActions.Disable();
+            ResetInputCache();
         }
 
         private void OnDestroy()
@@ -97,7 +112,31 @@ namespace Role.Input
         private void LateUpdate()
         {
             _jumpPressedThisFrame = false;
+            _attackPressedThisFrame = false;
+            _selectPrimaryPressedThisFrame = false;
+            _selectSecondaryPressedThisFrame = false;
+            _selectMeleePressedThisFrame = false;
             _interactPressedThisFrame = false;
+            _openBagPressedThisFrame = false;
+            _openCraftPressedThisFrame = false;
+            _togglePanelPressedThisFrame = false;
+            _closeAllPressedThisFrame = false;
+        }
+
+        /// <summary> 清空所有输入缓存，避免组件重新启用后继承旧输入 </summary>
+        private void ResetInputCache()
+        {
+            _moveInput = Vector2.zero;
+            _lookInput = Vector2.zero;
+            _jumpPressedThisFrame = false;
+            _jumpHeld = false;
+            _attackPressedThisFrame = false;
+            _attackHeld = false;
+            _selectPrimaryPressedThisFrame = false;
+            _selectSecondaryPressedThisFrame = false;
+            _selectMeleePressedThisFrame = false;
+            _interactPressedThisFrame = false;
+            _sprintHeld = false;
             _openBagPressedThisFrame = false;
             _openCraftPressedThisFrame = false;
             _togglePanelPressedThisFrame = false;
@@ -123,10 +162,29 @@ namespace Role.Input
             _jumpHeld = context.ReadValueAsButton();
         }
 
-        public void OnPrimaryAction(InputAction.CallbackContext context)
+        public void OnAttack(InputAction.CallbackContext context)
         {
-            // performed 阶段设为 true，canceled 阶段（松开）设为 false
-            _actionPressed = context.phase == InputActionPhase.Performed;
+            if (context.performed)
+                _attackPressedThisFrame = true;
+            _attackHeld = context.ReadValueAsButton();
+        }
+
+        public void OnSelectPrimary(InputAction.CallbackContext context)
+        {
+            if (context.performed)
+                _selectPrimaryPressedThisFrame = true;
+        }
+
+        public void OnSelectSecondary(InputAction.CallbackContext context)
+        {
+            if (context.performed)
+                _selectSecondaryPressedThisFrame = true;
+        }
+
+        public void OnSelectMelee(InputAction.CallbackContext context)
+        {
+            if (context.performed)
+                _selectMeleePressedThisFrame = true;
         }
 
         public void OnSprint(InputAction.CallbackContext context)
