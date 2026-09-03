@@ -85,7 +85,7 @@ namespace Role.Controllers
                 CompleteSwitch();
         }
 
-        /// <summary> 拾取武器：落入归属槽位（同槽覆盖），并自动切换装备 </summary>
+        /// <summary> 拾取武器：落入归属槽位（同槽覆盖），并自动切换装备。Editor 调试菜单直接覆盖用 </summary>
         public bool Pickup(WeaponConfig weapon)
         {
             if (weapon == null || !TryGetSlotIndex(weapon.slot, out int index)) return false;
@@ -96,6 +96,39 @@ namespace Role.Controllers
 
             _slots[index] = weapon;
             SwitchTo(weapon.slot);
+            return true;
+        }
+
+        /// <summary> 目标槽位是否已有武器（供掉落物拾取与 UI 查询） </summary>
+        public bool HasWeaponInSlot(WeaponSlot slot)
+        {
+            return TryGetSlotIndex(slot, out int index) && _slots[index] != null;
+        }
+
+        /// <summary>
+        /// 运行时拾取入口：目标槽位已有武器时拒绝（不覆盖），空槽才落槽并切换。
+        /// 与 Pickup 的区别在于——玩家从地图捡武器时不允许悄悄顶掉旧武器。
+        /// </summary>
+        public bool TryPickup(WeaponConfig weapon, out string failReason)
+        {
+            failReason = null;
+            if (weapon == null)
+            {
+                failReason = "武器配置为空";
+                return false;
+            }
+            if (!TryGetSlotIndex(weapon.slot, out int index))
+            {
+                failReason = "武器槽位非法";
+                return false;
+            }
+            if (_slots[index] != null)
+            {
+                failReason = "该槽位已装备武器，请先丢弃旧武器";
+                return false;
+            }
+
+            Pickup(weapon);
             return true;
         }
 

@@ -188,6 +188,9 @@ namespace Role
 
         // ===== 公共接口 =====
 
+        /// <summary> 装备控制器（子控制器，未拖拽且未自动找到时为 null） </summary>
+        public Controllers.EquipmentController Equipment => equipmentCtrl;
+
         /// <summary>
         /// 平滑转向目标方向（只取水平面，保持角色不抬头/低头）
         /// </summary>
