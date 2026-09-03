@@ -143,6 +143,15 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""DropWeapon"",
+                    ""type"": ""Button"",
+                    ""id"": ""b1b2c3d4-0005-4000-8000-000000000005"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -332,6 +341,17 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""action"": ""CloseAll"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b1b2c3d4-0005-4000-8000-000000000005"",
+                    ""path"": ""<Keyboard>/g"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""DropWeapon"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -353,6 +373,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         m_Player_OpenCraft = m_Player.FindAction("OpenCraft", throwIfNotFound: true);
         m_Player_TogglePanel = m_Player.FindAction("TogglePanel", throwIfNotFound: true);
         m_Player_CloseAll = m_Player.FindAction("CloseAll", throwIfNotFound: true);
+        m_Player_DropWeapon = m_Player.FindAction("DropWeapon", throwIfNotFound: true);
     }
 
     public void Dispose()
@@ -427,6 +448,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
     private readonly InputAction m_Player_OpenCraft;
     private readonly InputAction m_Player_TogglePanel;
     private readonly InputAction m_Player_CloseAll;
+    private readonly InputAction m_Player_DropWeapon;
     public struct PlayerActions
     {
         private @PlayerInputActions m_Wrapper;
@@ -444,6 +466,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         public InputAction @OpenCraft => m_Wrapper.m_Player_OpenCraft;
         public InputAction @TogglePanel => m_Wrapper.m_Player_TogglePanel;
         public InputAction @CloseAll => m_Wrapper.m_Player_CloseAll;
+        public InputAction @DropWeapon => m_Wrapper.m_Player_DropWeapon;
         public InputActionMap Get() { return m_Wrapper.m_Player; }
         public void Enable() { Get().Enable(); }
         public void Disable() { Get().Disable(); }
@@ -492,6 +515,9 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @CloseAll.started += instance.OnCloseAll;
             @CloseAll.performed += instance.OnCloseAll;
             @CloseAll.canceled += instance.OnCloseAll;
+            @DropWeapon.started += instance.OnDropWeapon;
+            @DropWeapon.performed += instance.OnDropWeapon;
+            @DropWeapon.canceled += instance.OnDropWeapon;
         }
 
         private void UnregisterCallbacks(IPlayerActions instance)
@@ -535,6 +561,9 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @CloseAll.started -= instance.OnCloseAll;
             @CloseAll.performed -= instance.OnCloseAll;
             @CloseAll.canceled -= instance.OnCloseAll;
+            @DropWeapon.started -= instance.OnDropWeapon;
+            @DropWeapon.performed -= instance.OnDropWeapon;
+            @DropWeapon.canceled -= instance.OnDropWeapon;
         }
 
         public void RemoveCallbacks(IPlayerActions instance)
@@ -567,5 +596,6 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         void OnOpenCraft(InputAction.CallbackContext context);
         void OnTogglePanel(InputAction.CallbackContext context);
         void OnCloseAll(InputAction.CallbackContext context);
+        void OnDropWeapon(InputAction.CallbackContext context);
     }
 }

@@ -39,6 +39,9 @@ namespace Role.Core
         /// <summary> 本帧是否按下了冲刺 </summary>
         bool SprintPressed { get; }
 
+        /// <summary> 本帧是否按下丢弃武器键（边缘触发，按下当帧有效） </summary>
+        bool DropWeaponPressedThisFrame { get; }
+
         /// <summary> 本帧是否有任何输入（用于 Idle 检测） </summary>
         bool HasAnyInput { get; }
     }

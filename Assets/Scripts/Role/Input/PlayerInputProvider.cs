@@ -27,6 +27,7 @@ namespace Role.Input
         private bool    _openCraftPressedThisFrame;
         private bool    _togglePanelPressedThisFrame;
         private bool    _closeAllPressedThisFrame;
+        private bool    _dropWeaponPressedThisFrame;
 
         // ===== 生成的 Input Action 实例 =====
         private PlayerInputActions _inputActions;
@@ -68,13 +69,15 @@ namespace Role.Input
         public bool SelectMeleePressedThisFrame => _selectMeleePressedThisFrame;
         public bool InteractPressed => _interactPressedThisFrame;
         public bool SprintPressed => _sprintHeld;
+        public bool DropWeaponPressedThisFrame => _dropWeaponPressedThisFrame;
         public bool HasAnyInput => _moveInput.sqrMagnitude > 0.01f
             || _jumpPressedThisFrame
             || _attackHeld
             || _interactPressedThisFrame
             || _selectPrimaryPressedThisFrame
             || _selectSecondaryPressedThisFrame
-            || _selectMeleePressedThisFrame;
+            || _selectMeleePressedThisFrame
+            || _dropWeaponPressedThisFrame;
 
         // ===== IUiInputProvider 实现 =====
 
@@ -121,6 +124,7 @@ namespace Role.Input
             _openCraftPressedThisFrame = false;
             _togglePanelPressedThisFrame = false;
             _closeAllPressedThisFrame = false;
+            _dropWeaponPressedThisFrame = false;
         }
 
         /// <summary> 清空所有输入缓存，避免组件重新启用后继承旧输入 </summary>
@@ -141,6 +145,7 @@ namespace Role.Input
             _openCraftPressedThisFrame = false;
             _togglePanelPressedThisFrame = false;
             _closeAllPressedThisFrame = false;
+            _dropWeaponPressedThisFrame = false;
         }
 
         // ===== IPlayerActions 回调（对接生成的 PlayerInputActions）=====
@@ -220,6 +225,12 @@ namespace Role.Input
         {
             if (context.performed)
                 _closeAllPressedThisFrame = true;
+        }
+
+        public void OnDropWeapon(InputAction.CallbackContext context)
+        {
+            if (context.performed)
+                _dropWeaponPressedThisFrame = true;
         }
     }
 }

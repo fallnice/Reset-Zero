@@ -22,6 +22,12 @@ namespace Interaction
 
         public bool CanInteract => gameObject.activeInHierarchy && weaponConfig != null;
 
+        /// <summary> 运行时注入武器配置（丢弃武器生成掉落物时使用） </summary>
+        public void SetWeaponConfig(WeaponConfig config)
+        {
+            weaponConfig = config;
+        }
+
         public string GetPrompt()
         {
             string weaponName = weaponConfig != null ? weaponConfig.weaponName : "武器";

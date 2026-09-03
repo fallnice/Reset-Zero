@@ -37,6 +37,7 @@ namespace Core
 
         // ===== 武器/装备系统 =====
         public const string Weapon_Equipped = "weapon_equipped"; // (oldWeapon, newWeapon) 武器切换完成
+        public const string Weapon_Dropped  = "weapon_dropped";  // (weapon) 丢弃当前武器
 
         // ===== 加成道具 =====
         public const string Bonus_Used = "bonus_used"; // (itemId) 加成道具使用成功

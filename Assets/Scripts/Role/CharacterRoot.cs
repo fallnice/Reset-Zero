@@ -136,6 +136,9 @@ namespace Role
             else if (inputProvider.SelectMeleePressedThisFrame)
                 equipmentCtrl.SwitchTo(WeaponSlot.Melee);
 
+            if (inputProvider.DropWeaponPressedThisFrame)
+                equipmentCtrl.Drop();
+
             bool shouldAttack = inputProvider.AttackPressedThisFrame
                 || (equipmentCtrl.UsesContinuousAttackInput && inputProvider.AttackHeld);
             if (shouldAttack)

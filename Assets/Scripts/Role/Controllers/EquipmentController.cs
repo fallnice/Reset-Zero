@@ -3,6 +3,7 @@ using UnityEngine;
 using Role.Core;
 using Combat;
 using Core;
+using Interaction;
 
 namespace Role.Controllers
 {
@@ -19,6 +20,7 @@ namespace Role.Controllers
         private const float SWITCH_DURATION = 0.3f;       // 切换过渡时长（代码计时，不依赖动画）
         private const float DEFAULT_ATTACK_INTERVAL = 0.5f; // 旧资产缺少新字段时的安全回退值
         private const float MIN_ATTACK_INTERVAL = 0.01f;    // 防止异常倍率产生零间隔
+        private const float DROP_FORWARD_DISTANCE = 0.8f;    // 丢弃武器时掉落在玩家前方距离
         private const int SLOT_COUNT = 3;                    // 与 WeaponSlot 枚举一一对应
 
         private CharacterRoot _character;
@@ -130,6 +132,72 @@ namespace Role.Controllers
 
             Pickup(weapon);
             return true;
+        }
+
+        /// <summary>
+        /// 丢弃当前武器：清空槽位、打断切换、在玩家前方生成可再拾取的掉落物。
+        /// 无当前武器时返回 false 并提示。
+        /// </summary>
+        public bool Drop()
+        {
+            if (_currentWeapon == null)
+            {
+                EventBus.Emit(EventName.UI_Toast, "当前没有可丢弃的武器");
+                return false;
+            }
+            if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
+
+            // 丢弃会打断尚未完成的切换
+            _pendingWeapon = null;
+            _switchTimer = 0f;
+
+            WeaponConfig dropped = _currentWeapon;
+
+            _slots[index] = null;
+            _nextAttackAllowedTimes[index] = 0f;
+            _currentWeapon = null;
+            _currentBehavior = null;
+
+            Blackboard.Remove("Weapon_CurrentType");
+
+            // 表现层回到空手姿态（复用装备事件，newWeapon=null）
+            OnWeaponEquipped(dropped, null);
+            WeaponEquipped?.Invoke(dropped, null);
+            EventBus.Emit(EventName.Weapon_Equipped, dropped, null);
+            EventBus.Emit(EventName.Weapon_Dropped, dropped);
+
+            SpawnDroppedPickup(dropped);
+            return true;
+        }
+
+        /// <summary> 在玩家前方地面生成可拾取的武器掉落物（无模型时仍可交互拾取） </summary>
+        private void SpawnDroppedPickup(WeaponConfig weapon)
+        {
+            Vector3 origin = _character != null ? _character.transform.position : transform.position;
+            Vector3 forward = _character != null ? _character.transform.forward : transform.forward;
+            Vector3 spawnPos = origin + forward * DROP_FORWARD_DISTANCE + Vector3.up * 0.5f;
+
+            // 向下贴地，避免掉落物悬空；贴不到地则保留计算位置
+            if (Physics.Raycast(spawnPos, Vector3.down, out RaycastHit hit, 1.5f))
+                spawnPos = hit.point + Vector3.up * 0.15f;
+
+            GameObject pickup = new GameObject($"Dropped_{weapon.weaponName}");
+            pickup.transform.position = spawnPos;
+
+            // 可交互碰撞体：供 InteractionDetector 的 OverlapSphere 检测到
+            SphereCollider col = pickup.AddComponent<SphereCollider>();
+            col.isTrigger = true;
+            col.radius = 0.5f;
+
+            WeaponPickupItem item = pickup.AddComponent<WeaponPickupItem>();
+            item.SetWeaponConfig(weapon);
+
+            // 视觉模型：回家配置 modelPrefab 后可见；无模型时逻辑仍可拾取
+            if (weapon.modelPrefab != null)
+            {
+                GameObject model = Instantiate(weapon.modelPrefab, pickup.transform);
+                model.transform.localPosition = Vector3.zero;
+            }
         }
 
         /// <summary> 切换到指定槽位（空槽或当前武器忽略） </summary>
