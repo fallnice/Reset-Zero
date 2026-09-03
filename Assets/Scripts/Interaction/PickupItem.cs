@@ -40,7 +40,9 @@ namespace Interaction
             }
             else
             {
-                Debug.LogWarning("[PickupItem] 背包已满，无法拾取", this);
+                const string message = "背包已满，无法拾取";
+                Debug.LogWarning($"[PickupItem] {message}", this);
+                EventBus.Emit(EventName.UI_Toast, message);
             }
         }
     }

@@ -205,6 +205,7 @@ namespace EditorTools
             RegisterChecker("PlayerInputProvider 存在", CheckPlayerInputProvider);
             RegisterChecker("BagView 引用完整", CheckBagViewRefs);
             RegisterChecker("CraftView 引用完整", CheckCraftViewRefs);
+            RegisterChecker("ToastView 存在", CheckToastView);
             RegisterChecker("CameraFollow 引用完整", CheckCameraFollow);
         }
 
@@ -250,8 +251,15 @@ namespace EditorTools
             // 必填：缺失会 LogError 或按钮失效
             string[] required = { "recipeItemPrefab", "recipeListParent", "materialItemPrefab", "materialContainer", "minusBtn", "plusBtn", "craftBtn" };
             // 次要：代码有判空降级，缺失不崩，只影响显示
-            string[] optional = { "resultIconImg", "itemNameText", "ownCountText", "descText", "craftCountText", "tipText" };
+            string[] optional = { "resultIconImg", "itemNameText", "ownCountText", "descText", "craftCountText" };
             return CheckSerializedRefs(craft, required, optional);
+        }
+
+        /// <summary> 全局浮动提示：缺失时业务仍运行，但玩家看不到失败原因 </summary>
+        private static CheckResult CheckToastView()
+        {
+            bool found = UnityEngine.Object.FindObjectOfType<ToastView>(true) != null;
+            return new CheckResult(found, found ? "场景中存在 ToastView" : "场景中缺少 ToastView（全局浮动提示不可见）");
         }
 
         /// <summary> 相机跟随：target 未赋值 = 相机不跟随（代码直接 return） </summary>

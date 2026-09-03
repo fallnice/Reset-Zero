@@ -2,7 +2,6 @@ using Controller;
 using Core;
 using Dao;
 using Model;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,11 +32,6 @@ namespace View
         [SerializeField] private Button plusBtn;
         [SerializeField] private Text craftCountText;
         [SerializeField] private Button craftBtn;
-
-        [Header("浮动提示")]
-        [SerializeField] private Text tipText;
-        [SerializeField] private float tipDuration = 2f;   // 2秒消失
-        [SerializeField] private float tipFloatDistance = 60f;  // 上飘距离
 
         private CraftController _controller;
         private ItemDao _itemDao = new ItemDao();
@@ -280,7 +274,7 @@ namespace View
             }
             else
             {
-                ShowTip("材料不足");
+                EventBus.Emit(EventName.UI_Toast, "材料不足");
             }
         }
 
@@ -289,48 +283,6 @@ namespace View
         {
             if (itemId == 0) return null;
             return Resources.Load<Sprite>($"ItemIcons/{itemId}");
-        }
-        /// <summary>
-        /// 显示浮动提示（目前仅用于材料不足）
-        /// </summary>
-        private void ShowTip(string msg)
-        {
-            if (tipText == null) return;
-            StopAllCoroutines();            // 防止多个提示叠加
-            StartCoroutine(TipRoutine(msg));
-        }
-
-        private IEnumerator TipRoutine(string msg)
-        {
-            tipText.text = msg;
-            tipText.gameObject.SetActive(true);
-
-            // 初始：居中、全透明
-            Color c = tipText.color;
-            c.a = 0f;
-            tipText.color = c;
-
-            Vector3 startPos = tipText.rectTransform.anchoredPosition;
-            float elapsed = 0f;
-
-            while (elapsed < tipDuration)
-            {
-                elapsed += Time.deltaTime;
-                float t = elapsed / tipDuration;
-
-                // 前 0.3 秒淡入，之后淡出
-                float alpha = t < 0.15f ? t / 0.15f : 1f - (t - 0.15f) / 0.85f;
-                c.a = Mathf.Clamp01(alpha);
-                tipText.color = c;
-
-                // 上飘
-                tipText.rectTransform.anchoredPosition = startPos + Vector3.up * (tipFloatDistance * t);
-
-                yield return null;
-            }
-
-            tipText.gameObject.SetActive(false);
-            tipText.rectTransform.anchoredPosition = startPos; // 复位
         }
     }
 }

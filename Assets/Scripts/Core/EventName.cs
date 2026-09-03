@@ -24,6 +24,7 @@ namespace Core
         public const string UI_CraftClosed   = "ui_craft_closed";
         public const string UI_AllClosed     = "ui_all_closed";
         public const string UI_ForceClose_Bag = "ui_force_close_bag";  // 角色死亡/过场时强制关闭背包
+        public const string UI_Toast         = "ui_toast";            // (string message) 全局浮动提示
 
         // ===== 角色系统 =====
         public const string Character_StateChanged = "character_state_changed"; // (oldState, newState)
