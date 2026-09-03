@@ -2,6 +2,7 @@
 using Core;
 using Role;
 using Role.Input;
+using Role.Interaction;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -203,6 +204,7 @@ namespace EditorTools
             RegisterChecker("GameRoot 存在", CheckGameRoot);
             RegisterChecker("SqliteManager 存在", CheckSqliteManager);
             RegisterChecker("PlayerInputProvider 存在", CheckPlayerInputProvider);
+            RegisterChecker("InteractionDetector 存在", CheckInteractionDetector);
             RegisterChecker("BagView 引用完整", CheckBagViewRefs);
             RegisterChecker("CraftView 引用完整", CheckCraftViewRefs);
             RegisterChecker("ToastView 存在", CheckToastView);
@@ -229,6 +231,15 @@ namespace EditorTools
         {
             bool found = UnityEngine.Object.FindObjectOfType<PlayerInputProvider>(true) != null;
             return new CheckResult(found, found ? "场景中存在 PlayerInputProvider" : "场景中缺少 PlayerInputProvider（UI 快捷键与相机旋转不可用）");
+        }
+
+        /// <summary> 交互检测器：缺失时靠近可交互物无提示、按 E 无反应，且不报错（静默失效） </summary>
+        private static CheckResult CheckInteractionDetector()
+        {
+            bool found = UnityEngine.Object.FindObjectOfType<InteractionDetector>(true) != null;
+            return new CheckResult(found, found
+                ? "场景中存在 InteractionDetector"
+                : "场景中缺少 InteractionDetector（靠近可交互物无提示、按 E 无反应，且不报错，属于静默失效）");
         }
 
         /// <summary> 背包面板：slotPrefab/gridParent 缺失 = 格子无法生成（LogError） </summary>
