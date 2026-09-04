@@ -12,7 +12,7 @@ namespace View
     /// <summary>
     /// 背包面板UI（MVC-View层）
     /// </summary>
-    public class BagView : MonoBehaviour
+    public class BagView : MonoBehaviour, IModalPanel
     {
         [Header("预制体与父节点")]
         [SerializeField] private BagSlotItem slotPrefab; // 格子预制体
