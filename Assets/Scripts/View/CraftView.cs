@@ -11,7 +11,7 @@ namespace View
     /// <summary>
     /// 制作面板UI（MVC-View层）
     /// </summary>
-    public class CraftView : MonoBehaviour
+    public class CraftView : MonoBehaviour, IModalPanel
     {
         [Header("左侧配方列表")]
         [SerializeField] private CraftRecipeItem recipeItemPrefab;

@@ -1,4 +1,5 @@
 using UnityEngine;
+using Core;
 using Role.Core;
 using Role.States;
 using Combat;
@@ -32,6 +33,10 @@ namespace Role
         public StateMachine.FullBodyStateMachine fullBodySM;
         public StateMachine.UpperBodyStateMachine upperBodySM;
         private StateMachine.IUpperBodyAnimationSink _upperBodyAnimationSink;
+
+        // UI 模态（背包/制作等面板打开）时阻断战斗输入
+        private bool _uiModalOpen;
+        private EventBus.SubscriptionToken _uiModalToken;
 
         [Header("子控制器（可选，未拖拽则自动查找）")]
         [SerializeField] private Controllers.EquipmentController equipmentCtrl;
@@ -78,6 +83,12 @@ namespace Role
                 equipmentCtrl.AttackCommitted += HandleAttackCommitted;
             }
 
+            // 订阅 UI 模态状态：任一模态面板打开时阻断战斗输入（攻击/切枪/丢弃）
+            _uiModalToken = EventBus.Subscribe(EventName.UI_ModalChanged, args =>
+            {
+                _uiModalOpen = args != null && args.Length > 0 && args[0] is bool b && b;
+            });
+
             // 检查 CharacterController
             if (GetComponent<CharacterController>() == null)
                 Debug.LogError("[CharacterRoot] 缺少 CharacterController 组件，角色无法移动", this);
@@ -113,8 +124,8 @@ namespace Role
             upperBodySM.SetSuppressed(!canAttack);
             HandleCombatInput();
 
-            // 死亡/眩晕/过场等状态下停止移动状态机
-            bool canMove = coordinator == null || coordinator.CanMove;
+            // 死亡/眩晕/过场/UI 模态等状态下停止移动状态机
+            bool canMove = (coordinator == null || coordinator.CanMove) && !_uiModalOpen;
             if (canMove)
             {
                 fullBodySM.OnUpdate();
@@ -128,6 +139,9 @@ namespace Role
         private void HandleCombatInput()
         {
             if (inputProvider == null || equipmentCtrl == null) return;
+
+            // UI 模态打开时阻断战斗输入（攻击/切枪/丢弃）
+            if (_uiModalOpen) return;
 
             if (inputProvider.SelectPrimaryPressedThisFrame)
                 equipmentCtrl.SwitchTo(WeaponSlot.Primary);
@@ -186,6 +200,7 @@ namespace Role
                 equipmentCtrl.AttackCommitted -= HandleAttackCommitted;
             }
 
+            _uiModalToken?.Dispose();
             Blackboard.Clear();
         }
 
