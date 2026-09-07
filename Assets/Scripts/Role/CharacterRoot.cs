@@ -209,6 +209,18 @@ namespace Role
         /// <summary> 装备控制器（子控制器，未拖拽且未自动找到时为 null） </summary>
         public Controllers.EquipmentController Equipment => equipmentCtrl;
 
+        /// <summary> 当前瞄准方向（世界空间，已归一化）；无输入时回退角色朝向 </summary>
+        public Vector3 GetAimDirection()
+        {
+            if (inputProvider != null)
+            {
+                Vector3 dir = inputProvider.LookDirection;
+                if (dir.sqrMagnitude > 0.0001f)
+                    return dir.normalized;
+            }
+            return transform.forward;
+        }
+
         /// <summary>
         /// 平滑转向目标方向（只取水平面，保持角色不抬头/低头）
         /// </summary>

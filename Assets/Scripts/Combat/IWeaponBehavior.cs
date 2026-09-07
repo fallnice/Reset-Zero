@@ -13,6 +13,7 @@ namespace Combat
 
         /// <summary> 执行一次攻击：命中判定 + 造成伤害 </summary>
         /// <param name="attackMultiplier">攻击力倍率（来自角色加成，1.0=无加成）</param>
-        void Attack(Transform attacker, WeaponConfig weapon, float attackMultiplier);
+        /// <param name="aimDirection">瞄准方向（世界空间，已归一化；近战可忽略，枪械沿此方向发射）</param>
+        void Attack(Transform attacker, WeaponConfig weapon, float attackMultiplier, Vector3 aimDirection);
     }
 }

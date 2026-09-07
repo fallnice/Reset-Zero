@@ -265,7 +265,8 @@ namespace Role.Controllers
             if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
 
             float attackMultiplier = Blackboard.Get(CombatKeys.AttackMultiplier, 1f);
-            _currentBehavior.Attack(_character.transform, _currentWeapon, attackMultiplier);
+            Vector3 aimDirection = _character.GetAimDirection();
+            _currentBehavior.Attack(_character.transform, _currentWeapon, attackMultiplier, aimDirection);
 
             _nextAttackAllowedTimes[index] = Time.time + CurrentAttackInterval;
             AttackCommitted?.Invoke(_currentWeapon);

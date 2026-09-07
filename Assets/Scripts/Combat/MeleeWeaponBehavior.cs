@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Combat
@@ -9,7 +10,10 @@ namespace Combat
     {
         public WeaponType Type => WeaponType.Melee;
 
-        public void Attack(Transform attacker, WeaponConfig weapon, float attackMultiplier)
+        // 复用碰撞体缓冲区；攻击非每帧触发，无每帧 GC 压力
+        private static readonly Collider[] _hitBuffer = new Collider[32];
+
+        public void Attack(Transform attacker, WeaponConfig weapon, float attackMultiplier, Vector3 aimDirection)
         {
             if (attacker == null || weapon == null) return;
 
@@ -19,16 +23,23 @@ namespace Combat
             Vector3 center = attacker.position + attacker.forward * (weapon.range * 0.5f);
             float radius = weapon.range;
 
-            Collider[] hits = Physics.OverlapSphere(center, radius);
-            foreach (Collider hit in hits)
+            int count = Physics.OverlapSphereNonAlloc(center, radius, _hitBuffer, weapon.hitMask);
+
+            // 同一目标（根对象）只扣一次血，避免其多个 Collider 被重复命中
+            var damaged = new HashSet<IDamageable>();
+            for (int i = 0; i < count; i++)
             {
+                Collider hit = _hitBuffer[i];
                 if (hit == null) continue;
 
-                // TODO: 攻击者自身实现 IDamageable 时需过滤，避免自伤
-                // TODO: 同一目标多个 Collider 会重复扣血，正式版需按根对象去重
+                // 过滤攻击者自身：角色身上的碰撞体不会误伤自己
+                if (hit.transform.IsChildOf(attacker)) continue;
+
                 IDamageable target = hit.GetComponentInParent<IDamageable>();
-                if (target != null)
-                    target.TakeDamage(damage);
+                if (target == null) continue;
+                if (!damaged.Add(target)) continue;
+
+                target.TakeDamage(damage);
             }
         }
     }
