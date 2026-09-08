@@ -261,7 +261,7 @@ namespace Role.Controllers
             if (!CanAttack || _character == null) return false;
             if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
 
-            float attackMultiplier = _character.CombatStats.attackMultiplier;
+            float attackMultiplier = _character.Context.CombatStats.attackMultiplier;
             Vector3 aimDirection = _character.GetAimDirection();
             _currentBehavior.Attack(_character.transform, _currentWeapon, attackMultiplier, aimDirection);
 
@@ -284,7 +284,7 @@ namespace Role.Controllers
 
             // 攻速倍率来自角色实例 CombatStats；未注入角色时回退 1.0
             float speedMultiplier = _character != null
-                ? _character.CombatStats.meleeAttackSpeedMultiplier
+                ? _character.Context.CombatStats.meleeAttackSpeedMultiplier
                 : 1f;
             if (speedMultiplier <= 0f)
                 speedMultiplier = 1f;

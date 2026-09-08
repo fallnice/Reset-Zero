@@ -40,11 +40,8 @@ namespace Role
         [Header("协调器")]
         [SerializeField] private CharacterStateCoordinator coordinator;
 
-        /// <summary> 角色实例运行时数据（移动速度/空中速度等），多角色互不干扰 </summary>
-        public CharacterRuntimeData Runtime { get; private set; }
-
-        /// <summary> 角色实例战斗属性（攻击/攻速加成），玩家由 BonusController 累加 </summary>
-        public CombatStats CombatStats { get; private set; }
+        /// <summary> 角色共享上下文（运行时数据 + 战斗属性），由根节点组装并注入给状态机/控制器 </summary>
+        public CharacterContext Context { get; private set; }
 
         // 状态机是纯 C# 类，不挂 GameObject，Awake 中 new
         public StateMachine.FullBodyStateMachine fullBodySM;
@@ -87,9 +84,8 @@ namespace Role
             fullBodySM = new StateMachine.FullBodyStateMachine();
             upperBodySM = new StateMachine.UpperBodyStateMachine();
 
-            // 初始化角色实例数据（替代静态 Blackboard 的实例级容器）
-            Runtime = new CharacterRuntimeData();
-            CombatStats = new CombatStats();
+            // 组装角色共享上下文（实例级运行时数据 + 战斗属性，替代静态 Blackboard）
+            Context = new CharacterContext(new CharacterRuntimeData(), new CombatStats());
 
             // 获取子控制器（全部可选，缺失只 log 不报错）
             if (equipmentCtrl == null)

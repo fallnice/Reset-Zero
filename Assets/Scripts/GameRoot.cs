@@ -186,7 +186,7 @@ public class GameRoot : MonoBehaviour
             return;
         }
 
-        BonusController.SetCombatStats(_playerCharacter.CombatStats);
+        BonusController.SetCombatStats(_playerCharacter.Context.CombatStats);
     }
 
     private void OnApplicationQuit()

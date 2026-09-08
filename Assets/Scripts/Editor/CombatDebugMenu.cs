@@ -74,7 +74,7 @@ namespace EditorTools
                 ? "未初始化"
                 : $"{character.upperBodySM.CurrentMode}（抑制={character.upperBodySM.IsSuppressed}）";
 
-            CombatStats stats = character != null ? character.CombatStats : null;
+            CombatStats stats = character != null ? character.Context.CombatStats : null;
             float attackMultiplier = stats != null ? stats.attackMultiplier : 1f;
             float speedMultiplier = stats != null ? stats.meleeAttackSpeedMultiplier : 1f;
 
@@ -135,7 +135,7 @@ namespace EditorTools
             }
 
             CharacterRoot character = Object.FindObjectOfType<CharacterRoot>(true);
-            CombatStats stats = character != null ? character.CombatStats : null;
+            CombatStats stats = character != null ? character.Context.CombatStats : null;
             float attackMultiplier = stats != null ? stats.attackMultiplier : 1f;
             float speedMultiplier = stats != null ? stats.meleeAttackSpeedMultiplier : 1f;
 

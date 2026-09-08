@@ -28,7 +28,7 @@ namespace Role.States.FullBody
             var dir = character.inputProvider != null
                 ? character.inputProvider.MoveDirection
                 : Vector3.zero;
-            float speed = character.Runtime.moveSpeed;
+            float speed = character.Context.Runtime.moveSpeed;
 
             Vector3 velocity = dir * speed;
             _verticalVelocity += character.Config.gravity * Time.deltaTime;
@@ -42,7 +42,7 @@ namespace Role.States.FullBody
             // 速度转负 → Fall（传递当前垂直速度）
             if (_verticalVelocity < 0f)
             {
-                character.Runtime.airVerticalVelocity = _verticalVelocity;
+                character.Context.Runtime.airVerticalVelocity = _verticalVelocity;
                 character.fullBodySM.ToFall();
             }
         }

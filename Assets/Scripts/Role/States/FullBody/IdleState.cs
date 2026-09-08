@@ -15,7 +15,7 @@ namespace Role.States.FullBody
         public override void OnEnter()
         {
             _cc = character.GetComponent<CharacterController>();
-            character.Runtime.moveSpeed = 0f;
+            character.Context.Runtime.moveSpeed = 0f;
 
             if (Animator != null)
             {
