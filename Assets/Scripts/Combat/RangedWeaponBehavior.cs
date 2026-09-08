@@ -14,6 +14,7 @@ namespace Combat
             if (attacker == null || weapon == null) return;
 
             float damage = weapon.damage * attackMultiplier;
+            Faction sourceFaction = DamageContext.ResolveFaction(attacker);
 
             // 瞄准方向优先（相机准星）；无有效方向时回退角色朝向
             Vector3 direction = aimDirection.sqrMagnitude > 0.0001f
@@ -31,7 +32,16 @@ namespace Combat
 
                 IDamageable target = hit.collider.GetComponentInParent<IDamageable>();
                 if (target != null)
-                    target.TakeDamage(damage);
+                {
+                    target.TakeDamage(new DamageContext
+                    {
+                        amount = damage,
+                        attacker = attacker.gameObject,
+                        sourceFaction = sourceFaction,
+                        hitPoint = hit.point,
+                        direction = direction,
+                    });
+                }
                 // TODO(表现层): 命中特效 / 弹孔 / 音效
             }
         }

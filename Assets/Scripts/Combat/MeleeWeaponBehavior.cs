@@ -18,6 +18,7 @@ namespace Combat
             if (attacker == null || weapon == null) return;
 
             float damage = weapon.damage * attackMultiplier;
+            Faction sourceFaction = DamageContext.ResolveFaction(attacker);
 
             // 以角色前方为圆心扫一个球形范围（半径 = 攻击范围）
             Vector3 center = attacker.position + attacker.forward * (weapon.range * 0.5f);
@@ -39,7 +40,18 @@ namespace Combat
                 if (target == null) continue;
                 if (!damaged.Add(target)) continue;
 
-                target.TakeDamage(damage);
+                Vector3 dir = hit.transform.position - attacker.position;
+                if (dir.sqrMagnitude < 0.0001f) dir = attacker.forward;
+                else dir.Normalize();
+
+                target.TakeDamage(new DamageContext
+                {
+                    amount = damage,
+                    attacker = attacker.gameObject,
+                    sourceFaction = sourceFaction,
+                    hitPoint = hit.transform.position,
+                    direction = dir,
+                });
             }
         }
     }

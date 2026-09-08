@@ -1,6 +1,5 @@
 using UnityEngine;
 using Role.StateMachine;
-using Role.Core;
 
 namespace Role.States.FullBody
 {
@@ -15,7 +14,7 @@ namespace Role.States.FullBody
         public override void OnEnter()
         {
             _cc = character.GetComponent<CharacterController>();
-            _verticalVelocity = Blackboard.Get<float>("Air_VerticalVelocity", 0f);
+            _verticalVelocity = character.Runtime.airVerticalVelocity;
 
             if (Animator != null)
                 Animator.SetBool("IsGrounded", false);
@@ -29,7 +28,7 @@ namespace Role.States.FullBody
             var dir = character.inputProvider != null
                 ? character.inputProvider.MoveDirection
                 : Vector3.zero;
-            float speed = Blackboard.Get<float>("MoveSpeed", 3.5f);
+            float speed = character.Runtime.moveSpeed;
 
             Vector3 velocity = dir * speed;
             _verticalVelocity += character.Config.gravity * Time.deltaTime;

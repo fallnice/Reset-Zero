@@ -1,6 +1,5 @@
 using UnityEngine;
 using Role.StateMachine;
-using Role.Core;
 
 namespace Role.States.FullBody
 {
@@ -15,7 +14,7 @@ namespace Role.States.FullBody
         public override void OnEnter()
         {
             _cc = character.GetComponent<CharacterController>();
-            Blackboard.Set("MoveSpeed", character.Config.runSpeed);
+            character.Runtime.moveSpeed = character.Config.runSpeed;
 
             if (Animator != null)
             {

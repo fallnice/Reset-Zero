@@ -1,6 +1,5 @@
 using UnityEngine;
 using Role.StateMachine;
-using Role.Core;
 
 namespace Role.States.FullBody
 {
@@ -29,7 +28,7 @@ namespace Role.States.FullBody
             var dir = character.inputProvider != null
                 ? character.inputProvider.MoveDirection
                 : Vector3.zero;
-            float speed = Blackboard.Get<float>("MoveSpeed", 3.5f);
+            float speed = character.Runtime.moveSpeed;
 
             Vector3 velocity = dir * speed;
             _verticalVelocity += character.Config.gravity * Time.deltaTime;
@@ -43,7 +42,7 @@ namespace Role.States.FullBody
             // 速度转负 → Fall（传递当前垂直速度）
             if (_verticalVelocity < 0f)
             {
-                Blackboard.Set("Air_VerticalVelocity", _verticalVelocity);
+                character.Runtime.airVerticalVelocity = _verticalVelocity;
                 character.fullBodySM.ToFall();
             }
         }

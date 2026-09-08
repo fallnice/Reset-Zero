@@ -3,7 +3,6 @@ using Combat;
 using Core;
 using Role;
 using Role.Controllers;
-using Role.Core;   // Blackboard
 using UnityEditor;
 using UnityEngine;
 
@@ -75,11 +74,15 @@ namespace EditorTools
                 ? "未初始化"
                 : $"{character.upperBodySM.CurrentMode}（抑制={character.upperBodySM.IsSuppressed}）";
 
+            CombatStats stats = character != null ? character.CombatStats : null;
+            float attackMultiplier = stats != null ? stats.attackMultiplier : 1f;
+            float speedMultiplier = stats != null ? stats.meleeAttackSpeedMultiplier : 1f;
+
             Debug.Log(
                 $"[战斗调试] 当前槽位={equipment.CurrentSlot} 武器={weaponName} 模式={fireMode}\n" +
                 $"UpperBody={upperBody}\n" +
-                $"攻击倍率={Blackboard.Get(CombatKeys.AttackMultiplier, 1f):0.##}\n" +
-                $"近战攻速倍率={Blackboard.Get(CombatKeys.MeleeAttackSpeedMultiplier, 1f):0.##}\n" +
+                $"攻击倍率={attackMultiplier:0.##}\n" +
+                $"近战攻速倍率={speedMultiplier:0.##}\n" +
                 $"当前攻击间隔={equipment.CurrentAttackInterval:0.###}s " +
                 $"剩余冷却={equipment.AttackCooldownRemaining:0.###}s\n" +
                 $"是否切换中={equipment.IsSwitching} 是否可攻击={equipment.CanAttack}");
@@ -131,9 +134,14 @@ namespace EditorTools
                 return;
             }
 
+            CharacterRoot character = Object.FindObjectOfType<CharacterRoot>(true);
+            CombatStats stats = character != null ? character.CombatStats : null;
+            float attackMultiplier = stats != null ? stats.attackMultiplier : 1f;
+            float speedMultiplier = stats != null ? stats.meleeAttackSpeedMultiplier : 1f;
+
             Debug.Log($"[战斗调试] 已使用加成道具 ID:{itemId}，攻击倍率=" +
-                      $"{Blackboard.Get(CombatKeys.AttackMultiplier, 1f):0.##}，近战攻速倍率=" +
-                      $"{Blackboard.Get(CombatKeys.MeleeAttackSpeedMultiplier, 1f):0.##}");
+                      $"{attackMultiplier:0.##}，近战攻速倍率=" +
+                      $"{speedMultiplier:0.##}");
         }
 
         private const string SWITCH_HINT = "切换需 0.3 秒";

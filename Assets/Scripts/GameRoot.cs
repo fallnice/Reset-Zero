@@ -4,6 +4,7 @@ using UnityEngine;
 using View;
 using Role.Core;
 using Role.Input;
+using Role;
 
 public class GameRoot : MonoBehaviour
 {
@@ -18,6 +19,11 @@ public class GameRoot : MonoBehaviour
     // UI 输入提供者——角色可能在 GameRoot 之后才初始化，延迟获取后缓存
     private IUiInputProvider _uiInput;
     private bool _uiInputMissingWarned;   // 同类 Warning 只打印一次
+
+    // 玩家角色——用于把玩家 CombatStats 注入 BonusController；延迟获取后缓存
+    private CharacterRoot _playerCharacter;
+    private bool _playerCharacterMissingWarned;
+
     private bool _initialized;             // 模块初始化是否成功（失败则 Update 不再处理输入）
 
     private void Awake()
@@ -101,6 +107,9 @@ public class GameRoot : MonoBehaviour
         // 初始化失败（如缺 SqliteManager）时不再处理输入，避免空引用
         if (!_initialized) return;
 
+        // 延迟注入玩家 CombatStats 到 BonusController
+        ResolvePlayerCombatStats();
+
         // 延迟获取 UI 输入提供者（角色可能在 GameRoot 之后才初始化，首次非 null 后缓存）
         if (_uiInput == null)
         {
@@ -147,6 +156,37 @@ public class GameRoot : MonoBehaviour
         {
             UIController.CloseAllPanels();
         }
+    }
+
+    /// <summary>
+    /// 延迟查找玩家角色并把其 CombatStats 注入 BonusController；
+    /// 角色可能在 GameRoot 之后才初始化，首次非 null 后缓存不再查找。
+    /// </summary>
+    private void ResolvePlayerCombatStats()
+    {
+        if (BonusController == null || _playerCharacter != null) return;
+
+        CharacterRoot[] roots = FindObjectsOfType<CharacterRoot>();
+        for (int i = 0; i < roots.Length; i++)
+        {
+            if (roots[i] != null && roots[i].IsPlayerControlled)
+            {
+                _playerCharacter = roots[i];
+                break;
+            }
+        }
+
+        if (_playerCharacter == null)
+        {
+            if (!_playerCharacterMissingWarned)
+            {
+                _playerCharacterMissingWarned = true;
+                Debug.LogWarning("[GameRoot] 未找到玩家 CharacterRoot，加成道具暂不可用");
+            }
+            return;
+        }
+
+        BonusController.SetCombatStats(_playerCharacter.CombatStats);
     }
 
     private void OnApplicationQuit()

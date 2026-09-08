@@ -9,7 +9,7 @@ namespace Role.Controllers
 {
     /// <summary>
     /// 装备控制器——武器栏（求生之路式固定三槽）+ 武器切换中枢
-    /// 逻辑层：槽位管理、切换过渡、行为策略、Blackboard 同步、事件广播
+    /// 逻辑层：槽位管理、切换过渡、行为策略、事件广播
     /// 武器模型/装备动画留在 OnWeaponEquipped 钩子；角色姿态由实例事件交给 CharacterRoot 路由
     /// </summary>
     public class EquipmentController : MonoBehaviour, IStateResponder
@@ -158,8 +158,6 @@ namespace Role.Controllers
             _currentWeapon = null;
             _currentBehavior = null;
 
-            Blackboard.Remove("Weapon_CurrentType");
-
             // 表现层回到空手姿态（复用装备事件，newWeapon=null）
             OnWeaponEquipped(dropped, null);
             WeaponEquipped?.Invoke(dropped, null);
@@ -234,7 +232,6 @@ namespace Role.Controllers
             _pendingWeapon = null;
             _switchTimer = 0f;
 
-            Blackboard.Set("Weapon_CurrentType", newWeapon.type);
             OnWeaponEquipped(oldWeapon, newWeapon);
             WeaponEquipped?.Invoke(oldWeapon, newWeapon);
             EventBus.Emit(EventName.Weapon_Equipped, oldWeapon, newWeapon);
@@ -264,7 +261,7 @@ namespace Role.Controllers
             if (!CanAttack || _character == null) return false;
             if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
 
-            float attackMultiplier = Blackboard.Get(CombatKeys.AttackMultiplier, 1f);
+            float attackMultiplier = _character.CombatStats.attackMultiplier;
             Vector3 aimDirection = _character.GetAimDirection();
             _currentBehavior.Attack(_character.transform, _currentWeapon, attackMultiplier, aimDirection);
 
@@ -274,7 +271,7 @@ namespace Role.Controllers
         }
 
         /// <summary> 计算当前武器的实际攻击间隔；近战攻速倍率越高，间隔越短 </summary>
-        private static float GetEffectiveAttackInterval(WeaponConfig weapon)
+        private float GetEffectiveAttackInterval(WeaponConfig weapon)
         {
             if (weapon == null) return 0f;
 
@@ -285,7 +282,10 @@ namespace Role.Controllers
             if (weapon.type != WeaponType.Melee)
                 return Mathf.Max(MIN_ATTACK_INTERVAL, baseInterval);
 
-            float speedMultiplier = Blackboard.Get(CombatKeys.MeleeAttackSpeedMultiplier, 1f);
+            // 攻速倍率来自角色实例 CombatStats；未注入角色时回退 1.0
+            float speedMultiplier = _character != null
+                ? _character.CombatStats.meleeAttackSpeedMultiplier
+                : 1f;
             if (speedMultiplier <= 0f)
                 speedMultiplier = 1f;
 

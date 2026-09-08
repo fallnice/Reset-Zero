@@ -12,7 +12,7 @@ namespace Role
     /// 需要 CharacterController 组件
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
-    public class CharacterRoot : MonoBehaviour
+    public class CharacterRoot : MonoBehaviour, IFactionMember
     {
         // ===== 输入 =====
         // IInputProvider 是接口，Inspector 无法序列化，Awake 中自动获取
@@ -26,8 +26,25 @@ namespace Role
         /// <summary> 角色配置数据（速度/重力/转身等），必须拖入 </summary>
         public CharacterConfig Config => config;
 
+        [Header("控制身份")]
+        [Tooltip("玩家角色响应 UI 模态（打开背包/制作时站住）；AI/敌人应关闭此开关")]
+        [SerializeField] private bool isPlayerControlled = true;
+        /// <summary> 是否为玩家控制角色（AI/敌人为 false） </summary>
+        public bool IsPlayerControlled => isPlayerControlled;
+
+        [Header("阵营")]
+        [SerializeField] private Faction faction = Faction.Player;
+        /// <summary> 角色阵营（用于友伤判定与目标筛选） </summary>
+        public Faction Faction => faction;
+
         [Header("协调器")]
         [SerializeField] private CharacterStateCoordinator coordinator;
+
+        /// <summary> 角色实例运行时数据（移动速度/空中速度等），多角色互不干扰 </summary>
+        public CharacterRuntimeData Runtime { get; private set; }
+
+        /// <summary> 角色实例战斗属性（攻击/攻速加成），玩家由 BonusController 累加 </summary>
+        public CombatStats CombatStats { get; private set; }
 
         // 状态机是纯 C# 类，不挂 GameObject，Awake 中 new
         public StateMachine.FullBodyStateMachine fullBodySM;
@@ -43,6 +60,11 @@ namespace Role
         [SerializeField] private Controllers.IKController ikCtrl;
         [SerializeField] private Controllers.ExpressionController expressionCtrl;
         [SerializeField] private Controllers.AudioController audioCtrl;
+
+        [Header("生命（可选，未拖拽则自动查找）")]
+        [SerializeField] private HealthController health;
+        /// <summary> 生命组件（未找到时为 null） </summary>
+        public HealthController Health => health;
 
         // ===== Unity 生命周期 =====
 
@@ -65,6 +87,10 @@ namespace Role
             fullBodySM = new StateMachine.FullBodyStateMachine();
             upperBodySM = new StateMachine.UpperBodyStateMachine();
 
+            // 初始化角色实例数据（替代静态 Blackboard 的实例级容器）
+            Runtime = new CharacterRuntimeData();
+            CombatStats = new CombatStats();
+
             // 获取子控制器（全部可选，缺失只 log 不报错）
             if (equipmentCtrl == null)
                 equipmentCtrl = GetComponentInChildren<Controllers.EquipmentController>();
@@ -75,6 +101,12 @@ namespace Role
             if (audioCtrl == null)
                 audioCtrl = GetComponentInChildren<Controllers.AudioController>();
 
+            // 获取生命组件并订阅死亡（可选，未挂 HealthController 时角色不可受伤）
+            if (health == null)
+                health = GetComponentInChildren<HealthController>();
+            if (health != null)
+                health.Died += HandleHealthDied;
+
             // 由根节点显式注入依赖，避免子控制器 Awake 顺序不确定
             if (equipmentCtrl != null)
             {
@@ -83,11 +115,14 @@ namespace Role
                 equipmentCtrl.AttackCommitted += HandleAttackCommitted;
             }
 
-            // 订阅 UI 模态状态：任一模态面板打开时阻断战斗输入（攻击/切枪/丢弃）
-            _uiModalToken = EventBus.Subscribe(EventName.UI_ModalChanged, args =>
+            // 只有玩家角色订阅 UI 模态；AI/敌人不因玩家打开面板而停止
+            if (isPlayerControlled)
             {
-                _uiModalOpen = args != null && args.Length > 0 && args[0] is bool b && b;
-            });
+                _uiModalToken = EventBus.Subscribe(EventName.UI_ModalChanged, args =>
+                {
+                    _uiModalOpen = args != null && args.Length > 0 && args[0] is bool b && b;
+                });
+            }
 
             // 检查 CharacterController
             if (GetComponent<CharacterController>() == null)
@@ -172,6 +207,12 @@ namespace Role
             upperBodySM?.TryPlayAction(StateMachine.UpperBodyAction.Fire);
         }
 
+        /// <summary> 生命归零时进入死亡状态（由 HealthController.Died 触发） </summary>
+        private void HandleHealthDied()
+        {
+            Die();
+        }
+
         /// <summary> 根据武器玩法类型选择持续上半身姿态，不依赖 Animator 参数 </summary>
         private static StateMachine.UpperBodyMode GetUpperBodyMode(WeaponConfig weapon)
         {
@@ -201,7 +242,9 @@ namespace Role
             }
 
             _uiModalToken?.Dispose();
-            Blackboard.Clear();
+
+            if (health != null)
+                health.Died -= HandleHealthDied;
         }
 
         // ===== 公共接口 =====

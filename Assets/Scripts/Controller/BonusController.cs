@@ -1,6 +1,5 @@
 using Combat;
 using Core;
-using Role.Core;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -8,12 +7,13 @@ namespace Controller
 {
     /// <summary>
     /// 加成道具控制器——处理「使用」逻辑
-    /// 使用流程：查加成配置 → 扣 1 个道具 → 把加成累加到角色 Blackboard → 广播事件
+    /// 使用流程：查加成配置 → 扣 1 个道具 → 把加成累加到玩家 CombatStats → 广播事件
     /// UI 层（BagView 的使用按钮）回家后调用 UseItem(itemId) 即可
     /// </summary>
     public class BonusController
     {
         private IInventory _inventory;
+        private CombatStats _combatStats;
         private readonly Dictionary<int, BonusItemConfig> _bonusDict = new Dictionary<int, BonusItemConfig>();
 
         public void Init(IInventory inventory)
@@ -29,6 +29,12 @@ namespace Controller
                 if (!_bonusDict.ContainsKey(config.itemId))
                     _bonusDict.Add(config.itemId, config);
             }
+        }
+
+        /// <summary> 注入玩家 CombatStats（由 GameRoot 在找到玩家角色后调用） </summary>
+        public void SetCombatStats(CombatStats stats)
+        {
+            _combatStats = stats;
         }
 
         /// <summary> 该物品是否为加成道具（供 UI 判断是否显示「使用」按钮） </summary>
@@ -58,19 +64,19 @@ namespace Controller
             return true;
         }
 
-        private static void ApplyBonus(BonusItemConfig config)
+        private void ApplyBonus(BonusItemConfig config)
         {
-            if (config.attackBonusPercent > 0f)
+            if (_combatStats == null)
             {
-                float current = Blackboard.Get(CombatKeys.AttackMultiplier, 1f);
-                Blackboard.Set(CombatKeys.AttackMultiplier, current + config.attackBonusPercent / 100f);
+                Debug.LogWarning("[BonusController] 玩家 CombatStats 未注入，加成无法生效");
+                return;
             }
 
+            if (config.attackBonusPercent > 0f)
+                _combatStats.attackMultiplier += config.attackBonusPercent / 100f;
+
             if (config.meleeAttackSpeedBonusPercent > 0f)
-            {
-                float current = Blackboard.Get(CombatKeys.MeleeAttackSpeedMultiplier, 1f);
-                Blackboard.Set(CombatKeys.MeleeAttackSpeedMultiplier, current + config.meleeAttackSpeedBonusPercent / 100f);
-            }
+                _combatStats.meleeAttackSpeedMultiplier += config.meleeAttackSpeedBonusPercent / 100f;
         }
     }
 }
