@@ -41,14 +41,20 @@ namespace Role.States.FullBody
                 _cc.Move(velocity * Time.deltaTime);
             }
 
-            // 角色朝向跟随移动方向（相机转向时角色自然跟着转）
-            if (dir.sqrMagnitude > 0.01f)
-                character.RotateToward(dir);
+            // 角色朝向跟随移动方向（相机转向时角色自然跟着转）；瞄准时由 CharacterRoot 锁定相机方向
+            character.RotateByMovement(dir);
 
             // 跳跃 → Jump
             if (input.JumpPressed)
             {
                 character.fullBodySM.ToJump();
+                return;
+            }
+
+            // 进入瞄准 → 退回 Walk（瞄准套无跑动动画，继续跑会滑步）
+            if (character.IsAiming)
+            {
+                character.fullBodySM.ToWalk();
                 return;
             }
 

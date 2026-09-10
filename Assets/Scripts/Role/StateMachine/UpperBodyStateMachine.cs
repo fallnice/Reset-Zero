@@ -7,7 +7,10 @@ namespace Role.StateMachine
     public enum UpperBodyMode
     {
         Inactive,
-        RangedReady
+        /// <summary> 持远程武器、未瞄准（枪械动画集的「未瞄准套」） </summary>
+        RangedReady,
+        /// <summary> 持远程武器且瞄准中（枪械动画集的「瞄准套」） </summary>
+        RangedAiming
     }
 
     /// <summary> 上半身瞬时动作语义，由动画适配层映射到 Trigger/动画片段 </summary>
@@ -87,12 +90,16 @@ namespace Role.StateMachine
         {
             if (_isSuppressed) return false;
             if ((action == UpperBodyAction.Fire || action == UpperBodyAction.Reload)
-                && _currentMode != UpperBodyMode.RangedReady)
+                && !IsRangedMode(_currentMode))
                 return false;
 
             _animationSink?.PlayUpperBodyAction(action);
             return true;
         }
+
+        /// <summary> 是否处于远程持械姿态——未瞄准与瞄准都算持枪，均可开火/换弹 </summary>
+        private static bool IsRangedMode(UpperBodyMode mode)
+            => mode == UpperBodyMode.RangedReady || mode == UpperBodyMode.RangedAiming;
 
         /// <summary> 将请求姿态与抑制状态合并为最终有效姿态 </summary>
         private void ApplyMode(bool force)
@@ -106,6 +113,9 @@ namespace Role.StateMachine
             _currentMode = effectiveMode;
             switch (effectiveMode)
             {
+                case UpperBodyMode.RangedAiming:
+                    ChangeState(new RangedAimingState());
+                    break;
                 case UpperBodyMode.RangedReady:
                     ChangeState(new RangedReadyState());
                     break;
@@ -123,5 +133,8 @@ namespace Role.StateMachine
 
         /// <summary> 远程武器持枪姿态标记状态；不承载攻击冷却或伤害逻辑 </summary>
         private sealed class RangedReadyState : BaseCharacterState { }
+
+        /// <summary> 远程武器瞄准姿态标记状态；不承载瞄准倍率或转向逻辑 </summary>
+        private sealed class RangedAimingState : BaseCharacterState { }
     }
 }

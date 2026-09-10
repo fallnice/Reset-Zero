@@ -41,9 +41,8 @@ namespace Role.States.FullBody
                 _cc.Move(velocity * Time.deltaTime);
             }
 
-            // 角色朝向跟随移动方向（相机转向时角色自然跟着转）
-            if (dir.sqrMagnitude > 0.01f)
-                character.RotateToward(dir);
+            // 角色朝向跟随移动方向（相机转向时角色自然跟着转）；瞄准时由 CharacterRoot 锁定相机方向
+            character.RotateByMovement(dir);
 
             if (input.JumpPressed)
             {
@@ -51,7 +50,8 @@ namespace Role.States.FullBody
                 return;
             }
 
-            if (input.SprintPressed && dir.sqrMagnitude > 0.01f)
+            // 瞄准时不允许起跑：瞄准套只有走路动画，跑起来必然滑步
+            if (input.SprintPressed && !character.IsAiming && dir.sqrMagnitude > 0.01f)
             {
                 character.fullBodySM.ToRun();
                 return;

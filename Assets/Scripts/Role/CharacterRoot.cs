@@ -12,7 +12,7 @@ namespace Role
     /// 需要 CharacterController 组件
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
-    public class CharacterRoot : MonoBehaviour, IFactionMember
+    public class CharacterRoot : MonoBehaviour, IFactionMember, IAimStateProvider
     {
         // ===== 输入 =====
         // IInputProvider 是接口，Inspector 无法序列化，Awake 中自动获取
@@ -51,6 +51,9 @@ namespace Role
         // UI 模态（背包/制作等面板打开）时阻断战斗输入
         private bool _uiModalOpen;
         private EventBus.SubscriptionToken _uiModalToken;
+
+        // 开火后自动进入瞄准状态的剩余时长：由 HandleAttackCommitted 重置，UpdateAimState 每帧递减
+        private float _autoAimRemain;
 
         [Header("子控制器（可选，未拖拽则自动查找）")]
         [SerializeField] private Controllers.EquipmentController equipmentCtrl;
@@ -150,6 +153,24 @@ namespace Role
             // 设置初始状态，并同步可能在 Start 前已装备的武器
             fullBodySM.ToIdle();
             upperBodySM.SetMode(GetUpperBodyMode(equipmentCtrl?.CurrentWeapon));
+
+            EquipInitialWeapons();
+        }
+
+        /// <summary>
+        /// 开局装备 CharacterConfig 里配置的初始武器——复用拾取链路（落槽 → 切换 → 广播 WeaponEquipped），
+        /// 因此动画集、上半身姿态、武器模型都会跟着走正常流程；未配置则出生空手。
+        /// </summary>
+        private void EquipInitialWeapons()
+        {
+            if (equipmentCtrl == null || config == null || config.initialWeapons == null) return;
+
+            WeaponConfig[] weapons = config.initialWeapons;
+            for (int i = 0; i < weapons.Length; i++)
+            {
+                if (weapons[i] != null)
+                    equipmentCtrl.Pickup(weapons[i]);
+            }
         }
 
         private void Update()
@@ -158,10 +179,15 @@ namespace Role
             upperBodySM.SetSuppressed(!canAttack);
             HandleCombatInput();
 
+            // 瞄准状态依赖本帧的开火结果，故放在战斗输入处理之后计算
+            UpdateAimState();
+
             // 死亡/眩晕/过场/UI 模态等状态下停止移动状态机
             bool canMove = (coordinator == null || coordinator.CanMove) && !_uiModalOpen;
             if (canMove)
             {
+                // 朝向先于移动状态机确定：瞄准时锁相机方向，Walk/Run 只管位移
+                UpdateFacing();
                 fullBodySM.OnUpdate();
             }
 
@@ -204,6 +230,31 @@ namespace Role
         {
             if (weapon == null || weapon.type != WeaponType.Ranged) return;
             upperBodySM?.TryPlayAction(StateMachine.UpperBodyAction.Fire);
+
+            // 开火即进入瞄准状态；松开瞄准键后由该计时器维持一小段再自动退出
+            if (config != null)
+                _autoAimRemain = config.aimAutoHoldSeconds;
+        }
+
+        /// <summary>
+        /// 聚合「是否处于瞄准状态」：需持有远程武器，且（按住瞄准键 或 处于开火后的自动保持期内）。
+        /// 每帧在 HandleCombatInput 之后调用，确保本帧刚提交的开火能当帧进入瞄准。
+        /// </summary>
+        private void UpdateAimState()
+        {
+            WeaponConfig weapon = equipmentCtrl != null ? equipmentCtrl.CurrentWeapon : null;
+            bool rangedEquipped = weapon != null && weapon.type == WeaponType.Ranged;
+            bool aimHeld = inputProvider != null && inputProvider.AimHeld;
+            bool canAct = coordinator == null || coordinator.CanAttack;
+
+            IsAiming = canAct && rangedEquipped && (aimHeld || _autoAimRemain > 0f);
+
+            // 同步给上半身状态机（SetMode 内部已去重，仅在姿态真正变化时才通知动画层）：
+            // 枪械动画集据此在「瞄准套 / 未瞄准套」两套子状态机之间切换
+            upperBodySM?.SetMode(GetUpperBodyMode(weapon));
+
+            if (_autoAimRemain > 0f)
+                _autoAimRemain -= Time.deltaTime;
         }
 
         /// <summary> 生命归零时进入死亡状态（由 HealthController.Died 触发） </summary>
@@ -212,12 +263,18 @@ namespace Role
             Die();
         }
 
-        /// <summary> 根据武器玩法类型选择持续上半身姿态，不依赖 Animator 参数 </summary>
-        private static StateMachine.UpperBodyMode GetUpperBodyMode(WeaponConfig weapon)
+        /// <summary>
+        /// 装备事实 + 瞄准状态 → 上半身持续姿态：
+        /// 非远程武器 → Inactive；远程未瞄准 → RangedReady；远程且瞄准中 → RangedAiming。
+        /// </summary>
+        private StateMachine.UpperBodyMode GetUpperBodyMode(WeaponConfig weapon)
         {
-            return weapon != null && weapon.type == WeaponType.Ranged
-                ? StateMachine.UpperBodyMode.RangedReady
-                : StateMachine.UpperBodyMode.Inactive;
+            if (weapon == null || weapon.type != WeaponType.Ranged)
+                return StateMachine.UpperBodyMode.Inactive;
+
+            return IsAiming
+                ? StateMachine.UpperBodyMode.RangedAiming
+                : StateMachine.UpperBodyMode.RangedReady;
         }
 
         private void LateUpdate()
@@ -251,6 +308,19 @@ namespace Role
         /// <summary> 装备控制器（子控制器，未拖拽且未自动找到时为 null） </summary>
         public Controllers.EquipmentController Equipment => equipmentCtrl;
 
+        /// <summary>
+        /// 当前是否处于瞄准状态（IAimStateProvider）：持远程武器，且（按住瞄准键 或 开火后的自动保持期内）。
+        /// 每帧由 UpdateAimState 计算，供相机拉近、准星等表现方读取。
+        /// </summary>
+        public bool IsAiming { get; private set; }
+
+        /// <summary>
+        /// UI 模态（背包/制作等面板）是否正在阻断战斗输入。
+        /// 为 true 时按 1/2/3、丢弃、攻击都会被 HandleCombatInput 直接挡掉，
+        /// 表现和输入失灵一模一样——排查「按键没反应」先看这个。
+        /// </summary>
+        public bool IsUiInputBlocked => _uiModalOpen;
+
         /// <summary> 当前瞄准方向（世界空间，已归一化）；无输入时回退角色朝向 </summary>
         public Vector3 GetAimDirection()
         {
@@ -269,14 +339,46 @@ namespace Role
         public void RotateToward(Vector3 direction)
         {
             if (config == null) return;
+            RotateToward(direction, config.rotationSpeed);
+        }
 
+        /// <summary> 平滑转向目标方向，用指定角速度系数 </summary>
+        private void RotateToward(Vector3 direction, float rotationSpeed)
+        {
             Vector3 flatDir = Vector3.ProjectOnPlane(direction, Vector3.up);
             if (flatDir.sqrMagnitude < 0.0001f) return;
             flatDir.Normalize();
 
             Quaternion targetRot = Quaternion.LookRotation(flatDir);
             transform.rotation = Quaternion.Slerp(
-                transform.rotation, targetRot, config.rotationSpeed * Time.deltaTime);
+                transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
+        }
+
+        /// <summary>
+        /// 按移动方向转身（供 Walk/Run 状态调用）。
+        /// 瞄准时直接返回——朝向已由 UpdateFacing 锁定在相机方向，移动输入只产生 strafe 位移。
+        /// </summary>
+        public void RotateByMovement(Vector3 moveDirection)
+        {
+            if (IsAiming) return;
+            if (moveDirection.sqrMagnitude > 0.01f)
+                RotateToward(moveDirection);
+        }
+
+        /// <summary>
+        /// 瞄准时把角色朝向锁定到相机水平方向（TPS strafe）。
+        /// 因为 IInputProvider.MoveDirection 本身就是相机相对方向（PlayerInputProvider 按相机投影计算），
+        /// 锁定朝向之后，输入的本地空间分解天然就是 左右(MoveX) / 前后(MoveY)，
+        /// 正好驱动瞄准套的八方向 Blend Tree。
+        /// 未瞄准时不干预——朝向由 Walk/Run 按移动方向决定。
+        /// </summary>
+        private void UpdateFacing()
+        {
+            if (!IsAiming || config == null) return;
+
+            Vector3 look = inputProvider != null ? inputProvider.LookDirection : Vector3.zero;
+            if (look.sqrMagnitude > 0.0001f)
+                RotateToward(look, config.aimRotationSpeed);
         }
 
         /// <summary> 角色死亡——只改状态，各控制器自行响应 </summary>

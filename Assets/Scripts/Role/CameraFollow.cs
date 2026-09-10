@@ -15,6 +15,12 @@ namespace Role
         [SerializeField] private float distance = 5f;
         [SerializeField] private float height = 2f;
 
+        [Header("瞄准拉近")]
+        [Tooltip("进入瞄准状态时的相机距离（右键按住，或远程开火后的自动保持期）；普通距离见上方 distance")]
+        [SerializeField] private float aimDistance = 2.5f;
+        [Tooltip("普通 ↔ 瞄准 之间过渡的平滑时间（秒）")]
+        [SerializeField] private float aimSmoothTime = 0.15f;
+
         [Header("鼠标旋转")]
         [SerializeField] private float rotationSpeed = 3f;
         [SerializeField] private float minPitch = -20f;   // 最低俯角
@@ -27,14 +33,21 @@ namespace Role
         private float _pitch;   // 垂直俯仰角
         private Vector3 _smoothVelocity;
 
+        private float _currentDistance;     // 当前实际距离（在 distance 与 aimDistance 之间平滑过渡）
+        private float _distanceVelocity;    // 距离平滑速度（SmoothDamp 内部状态）
+
         // 输入提供者——跨 MonoBehaviour 引用不在 Awake 缓存，LateUpdate 中延迟获取
         private Role.Core.IInputProvider _inputProvider;
         private bool _inputMissingWarned;   // 同类 Warning 只打印一次
+
+        // 瞄准状态——角色级聚合结果（输入 + 武器类型 + 开火自动进入），同样延迟获取
+        private Role.Core.IAimStateProvider _aimStateProvider;
 
         private void Start()
         {
             _yaw = target != null ? target.eulerAngles.y : 0f;
             _pitch = 15f;
+            _currentDistance = distance;
         }
 
         private void LateUpdate()
@@ -56,16 +69,26 @@ namespace Role
                 }
             }
 
+            // 延迟获取瞄准状态（首次非 null 后缓存；角色未实现该接口时一律视为未瞄准）
+            if (_aimStateProvider == null)
+                _aimStateProvider = target.GetComponentInChildren<Role.Core.IAimStateProvider>();
+
             // 鼠标/右摇杆输入控制旋转（统一走 Input System 的 Look action）
             UnityEngine.Vector2 lookDelta = _inputProvider.LookDelta;
             _yaw   += lookDelta.x * rotationSpeed;
             _pitch -= lookDelta.y * rotationSpeed;
             _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
 
+            // 瞄准时拉近：距离在普通值与瞄准值之间平滑过渡，避免进入/退出瞄准瞬间跳变
+            bool isAiming = _aimStateProvider != null && _aimStateProvider.IsAiming;
+            float targetDistance = isAiming ? aimDistance : distance;
+            _currentDistance = Mathf.SmoothDamp(
+                _currentDistance, targetDistance, ref _distanceVelocity, aimSmoothTime);
+
             // 计算相机目标位置（球面坐标）
             Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
             Vector3 targetPos = target.position + Vector3.up * height;
-            Vector3 desiredPos = targetPos - (rotation * Vector3.forward * distance);
+            Vector3 desiredPos = targetPos - (rotation * Vector3.forward * _currentDistance);
 
             // 平滑移动
             transform.position = Vector3.SmoothDamp(transform.position, desiredPos, ref _smoothVelocity, smoothTime);

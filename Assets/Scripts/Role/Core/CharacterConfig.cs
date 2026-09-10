@@ -1,4 +1,5 @@
 using UnityEngine;
+using Combat;
 
 namespace Role.Core
 {
@@ -21,5 +22,16 @@ namespace Role.Core
 
         [Header("转身")]
         [Min(0.1f)] public float rotationSpeed = 12f;
+
+        [Header("瞄准")]
+        [Tooltip("开火后自动进入瞄准状态的保持时长（秒）；按住瞄准键期间不受此值影响，可无限持续")]
+        [Min(0f)] public float aimAutoHoldSeconds = 1.5f;
+
+        [Tooltip("瞄准时角色转向相机方向的角速度系数；需明显高于 rotationSpeed 才跟手（调大更跟手）")]
+        [Min(0.1f)] public float aimRotationSpeed = 30f;
+
+        [Header("初始装备")]
+        [Tooltip("开局自动装备的武器，各按自己的 slot 落槽；数组最后一个成为手持武器。留空则出生空手")]
+        public WeaponConfig[] initialWeapons;
     }
 }
