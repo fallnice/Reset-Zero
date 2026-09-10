@@ -42,6 +42,15 @@
                     "initialStateCheck": false
                 },
                 {
+                    "name": "Aim",
+                    "type": "Button",
+                    "id": "c2d1e3f4-1004-4000-8000-000000000004",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
                     "name": "SelectPrimary",
                     "type": "Button",
                     "id": "c2d1e3f4-1001-4000-8000-000000000001",
@@ -212,8 +221,30 @@
                 },
                 {
                     "name": "",
+                    "id": "d2e1f3a4-1004-4000-8000-000000000004",
+                    "path": "<Mouse>/rightButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Aim",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
                     "id": "d2e1f3a4-1001-4000-8000-000000000001",
-                    "path": "<Keyboard>/digit1",
+                    "path": "<Keyboard>/1",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectPrimary",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e2e1f3a4-2001-4000-8000-000000000011",
+                    "path": "<Keyboard>/numpad1",
                     "interactions": "",
                     "processors": "",
                     "groups": "",
@@ -224,7 +255,18 @@
                 {
                     "name": "",
                     "id": "d2e1f3a4-1002-4000-8000-000000000002",
-                    "path": "<Keyboard>/digit2",
+                    "path": "<Keyboard>/2",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectSecondary",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e2e1f3a4-2002-4000-8000-000000000012",
+                    "path": "<Keyboard>/numpad2",
                     "interactions": "",
                     "processors": "",
                     "groups": "",
@@ -235,7 +277,18 @@
                 {
                     "name": "",
                     "id": "d2e1f3a4-1003-4000-8000-000000000003",
-                    "path": "<Keyboard>/digit3",
+                    "path": "<Keyboard>/3",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SelectMelee",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e2e1f3a4-2003-4000-8000-000000000013",
+                    "path": "<Keyboard>/numpad3",
                     "interactions": "",
                     "processors": "",
                     "groups": "",

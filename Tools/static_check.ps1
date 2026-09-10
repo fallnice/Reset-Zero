@@ -226,6 +226,67 @@ function Test-SceneFiles {
     }
 }
 
+# Rule: every "<Keyboard>/xxx" binding path must name a control that really exists
+# in the Input System keyboard layout. A path naming a non-existent control NEVER
+# fires at runtime, and the symptom is indistinguishable from "that key is broken"
+# (other keys work, actions are enabled, bindings are listed).
+#
+# Real trap: the number row is named "1".."0" in the layout, so "<Keyboard>/digit1"
+# is dead even though the C# property is Keyboard.current.digit1. The numpad keys
+# are "numpad1".."numpad0". Source of truth: the layout in the package cache.
+function Test-InputBindingPaths {
+    $cache = Join-Path $Project 'Library\PackageCache'
+    $keyboardCs = $null
+    if (Test-Path $cache) {
+        $pkg = @(Get-ChildItem $cache -Directory -Filter 'com.unity.inputsystem*' | Select-Object -First 1)
+        if ($pkg.Count -gt 0) {
+            $candidate = Join-Path $pkg[0].FullName 'InputSystem\Devices\Keyboard.cs'
+            if (Test-Path $candidate) { $keyboardCs = $candidate }
+        }
+    }
+    if (-not $keyboardCs) {
+        Add-Skip 'Keyboard binding paths (inputsystem layout source not in Library\PackageCache)'
+        return
+    }
+
+    $valid = @{}
+    foreach ($line in (Read-Lines $keyboardCs)) {
+        foreach ($m in [regex]::Matches($line, 'InputControl\(name = "([^"]+)"')) {
+            $valid[$m.Groups[1].Value] = $true
+        }
+    }
+
+    $hits = New-Object System.Collections.Generic.List[string]
+    if (Test-Path $AssetsRoot) {
+        $files = @(Get-ChildItem $AssetsRoot -Recurse -File | Where-Object {
+            $_.Extension -in @('.cs', '.inputactions')
+        })
+        foreach ($f in $files) {
+            $lineNo = 0
+            foreach ($line in (Read-Lines $f.FullName)) {
+                $lineNo++
+                # a path inside a comment is documentation, not a binding
+                $trimmed = $line.TrimStart()
+                if ($trimmed.StartsWith('//') -or $trimmed.StartsWith('*')) { continue }
+                foreach ($m in [regex]::Matches($line, '<Keyboard>/([A-Za-z0-9_]+)')) {
+                    $name = $m.Groups[1].Value
+                    if (-not $valid.ContainsKey($name)) {
+                        $hits.Add('  ' + (Get-Rel $f.FullName) + ':' + $lineNo + '  <Keyboard>/' + $name)
+                    }
+                }
+            }
+        }
+    }
+
+    if ($hits.Count -eq 0) {
+        Add-Pass "Keyboard binding paths resolve ($($valid.Count) known controls)"
+    } else {
+        Add-Fail "Unresolvable keyboard binding path(s) ($($hits.Count))"
+        foreach ($h in $hits) { Add-Line $h }
+        Add-Info '  (a dead path never fires; number row is "1".."0", NOT "digit1")'
+    }
+}
+
 # ── INFO-level checks (reported, do not fail the audit) ──────────────────
 
 # Rule: a source line must stay within 120 chars. Reported only (auto-generated
@@ -287,6 +348,7 @@ Test-DebugLogRule
 Test-MetaCompleteness
 Test-StringLookup
 Test-SceneFiles
+Test-InputBindingPaths
 Test-LineWidth
 Test-FieldNaming
 

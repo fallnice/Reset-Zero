@@ -18,6 +18,7 @@ namespace Role.Input
         private bool    _jumpHeld;               // 持续状态
         private bool    _attackPressedThisFrame;
         private bool    _attackHeld;
+        private bool    _aimHeld;                // 持续状态：按住瞄准键期间一直为 true
         private bool    _selectPrimaryPressedThisFrame;
         private bool    _selectSecondaryPressedThisFrame;
         private bool    _selectMeleePressedThisFrame;
@@ -64,6 +65,7 @@ namespace Role.Input
         public bool IsJumpHeld => _jumpHeld;
         public bool AttackPressedThisFrame => _attackPressedThisFrame;
         public bool AttackHeld => _attackHeld;
+        public bool AimHeld => _aimHeld;
         public bool SelectPrimaryPressedThisFrame => _selectPrimaryPressedThisFrame;
         public bool SelectSecondaryPressedThisFrame => _selectSecondaryPressedThisFrame;
         public bool SelectMeleePressedThisFrame => _selectMeleePressedThisFrame;
@@ -78,6 +80,16 @@ namespace Role.Input
             || _selectSecondaryPressedThisFrame
             || _selectMeleePressedThisFrame
             || _dropWeaponPressedThisFrame;
+
+        // ===== 诊断 =====
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// 运行时的输入动作集；未 Awake 时为 null。仅供编辑器自检按需读取（打包后不编译）。
+        /// 用来确认动作是否启用、绑定路径是否**真的解析到了控件**——解析到 0 个就是死绑定。
+        /// </summary>
+        public InputActionAsset Actions => _inputActions != null ? _inputActions.asset : null;
+#endif
 
         // ===== IUiInputProvider 实现 =====
 
@@ -136,6 +148,7 @@ namespace Role.Input
             _jumpHeld = false;
             _attackPressedThisFrame = false;
             _attackHeld = false;
+            _aimHeld = false;
             _selectPrimaryPressedThisFrame = false;
             _selectSecondaryPressedThisFrame = false;
             _selectMeleePressedThisFrame = false;
@@ -172,6 +185,11 @@ namespace Role.Input
             if (context.performed)
                 _attackPressedThisFrame = true;
             _attackHeld = context.ReadValueAsButton();
+        }
+
+        public void OnAim(InputAction.CallbackContext context)
+        {
+            _aimHeld = context.ReadValueAsButton();
         }
 
         public void OnSelectPrimary(InputAction.CallbackContext context)

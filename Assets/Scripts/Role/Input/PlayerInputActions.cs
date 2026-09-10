@@ -64,6 +64,15 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                     ""initialStateCheck"": false
                 },
                 {
+                    ""name"": ""Aim"",
+                    ""type"": ""Button"",
+                    ""id"": ""c2d1e3f4-1004-4000-8000-000000000004"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
                     ""name"": ""SelectPrimary"",
                     ""type"": ""Button"",
                     ""id"": ""c2d1e3f4-1001-4000-8000-000000000001"",
@@ -234,8 +243,30 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                 },
                 {
                     ""name"": """",
+                    ""id"": ""d2e1f3a4-1004-4000-8000-000000000004"",
+                    ""path"": ""<Mouse>/rightButton"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Aim"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
                     ""id"": ""d2e1f3a4-1001-4000-8000-000000000001"",
-                    ""path"": ""<Keyboard>/digit1"",
+                    ""path"": ""<Keyboard>/1"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectPrimary"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e2e1f3a4-2001-4000-8000-000000000011"",
+                    ""path"": ""<Keyboard>/numpad1"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
@@ -246,7 +277,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                 {
                     ""name"": """",
                     ""id"": ""d2e1f3a4-1002-4000-8000-000000000002"",
-                    ""path"": ""<Keyboard>/digit2"",
+                    ""path"": ""<Keyboard>/2"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectSecondary"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e2e1f3a4-2002-4000-8000-000000000012"",
+                    ""path"": ""<Keyboard>/numpad2"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
@@ -257,7 +299,18 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
                 {
                     ""name"": """",
                     ""id"": ""d2e1f3a4-1003-4000-8000-000000000003"",
-                    ""path"": ""<Keyboard>/digit3"",
+                    ""path"": ""<Keyboard>/3"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SelectMelee"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e2e1f3a4-2003-4000-8000-000000000013"",
+                    ""path"": ""<Keyboard>/numpad3"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
@@ -364,6 +417,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         m_Player_Look = m_Player.FindAction("Look", throwIfNotFound: true);
         m_Player_Jump = m_Player.FindAction("Jump", throwIfNotFound: true);
         m_Player_Attack = m_Player.FindAction("Attack", throwIfNotFound: true);
+        m_Player_Aim = m_Player.FindAction("Aim", throwIfNotFound: true);
         m_Player_SelectPrimary = m_Player.FindAction("SelectPrimary", throwIfNotFound: true);
         m_Player_SelectSecondary = m_Player.FindAction("SelectSecondary", throwIfNotFound: true);
         m_Player_SelectMelee = m_Player.FindAction("SelectMelee", throwIfNotFound: true);
@@ -439,6 +493,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
     private readonly InputAction m_Player_Look;
     private readonly InputAction m_Player_Jump;
     private readonly InputAction m_Player_Attack;
+    private readonly InputAction m_Player_Aim;
     private readonly InputAction m_Player_SelectPrimary;
     private readonly InputAction m_Player_SelectSecondary;
     private readonly InputAction m_Player_SelectMelee;
@@ -457,6 +512,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         public InputAction @Look => m_Wrapper.m_Player_Look;
         public InputAction @Jump => m_Wrapper.m_Player_Jump;
         public InputAction @Attack => m_Wrapper.m_Player_Attack;
+        public InputAction @Aim => m_Wrapper.m_Player_Aim;
         public InputAction @SelectPrimary => m_Wrapper.m_Player_SelectPrimary;
         public InputAction @SelectSecondary => m_Wrapper.m_Player_SelectSecondary;
         public InputAction @SelectMelee => m_Wrapper.m_Player_SelectMelee;
@@ -488,6 +544,9 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Attack.started += instance.OnAttack;
             @Attack.performed += instance.OnAttack;
             @Attack.canceled += instance.OnAttack;
+            @Aim.started += instance.OnAim;
+            @Aim.performed += instance.OnAim;
+            @Aim.canceled += instance.OnAim;
             @SelectPrimary.started += instance.OnSelectPrimary;
             @SelectPrimary.performed += instance.OnSelectPrimary;
             @SelectPrimary.canceled += instance.OnSelectPrimary;
@@ -534,6 +593,9 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
             @Attack.started -= instance.OnAttack;
             @Attack.performed -= instance.OnAttack;
             @Attack.canceled -= instance.OnAttack;
+            @Aim.started -= instance.OnAim;
+            @Aim.performed -= instance.OnAim;
+            @Aim.canceled -= instance.OnAim;
             @SelectPrimary.started -= instance.OnSelectPrimary;
             @SelectPrimary.performed -= instance.OnSelectPrimary;
             @SelectPrimary.canceled -= instance.OnSelectPrimary;
@@ -587,6 +649,7 @@ public partial class @PlayerInputActions: IInputActionCollection2, IDisposable
         void OnLook(InputAction.CallbackContext context);
         void OnJump(InputAction.CallbackContext context);
         void OnAttack(InputAction.CallbackContext context);
+        void OnAim(InputAction.CallbackContext context);
         void OnSelectPrimary(InputAction.CallbackContext context);
         void OnSelectSecondary(InputAction.CallbackContext context);
         void OnSelectMelee(InputAction.CallbackContext context);

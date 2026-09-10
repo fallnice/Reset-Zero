@@ -32,6 +32,8 @@ namespace Enemy
         public bool JumpPressed => false;
         public bool AttackPressedThisFrame => _attackPressedThisFrame;
         public bool AttackHeld => false;
+        /// <summary> AI 无瞄准键概念，恒为 false </summary>
+        public bool AimHeld => false;
         public bool SelectPrimaryPressedThisFrame => false;
         public bool SelectSecondaryPressedThisFrame => false;
         public bool SelectMeleePressedThisFrame => false;

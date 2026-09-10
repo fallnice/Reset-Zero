@@ -24,6 +24,12 @@ namespace Role.Core
         /// <summary> 攻击键是否持续按住（全自动武器使用） </summary>
         bool AttackHeld { get; }
 
+        /// <summary>
+        /// 瞄准键是否持续按住（如鼠标右键）。
+        /// 语义是「进入瞄准姿态」这一持续状态，不承载相机拉近或姿态表现，由消费方自行决定用法。
+        /// </summary>
+        bool AimHeld { get; }
+
         /// <summary> 本帧是否选择主武器槽（数字键 1） </summary>
         bool SelectPrimaryPressedThisFrame { get; }
 
