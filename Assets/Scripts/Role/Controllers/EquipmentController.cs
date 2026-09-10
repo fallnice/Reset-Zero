@@ -17,11 +17,33 @@ namespace Role.Controllers
         [Header("表现层配置（回家后拖入）")]
         [SerializeField] private Transform rightHandAttachPoint; // 右手武器挂点
 
-        private const float SWITCH_DURATION = 0.3f;       // 切换过渡时长（代码计时，不依赖动画）
+        [Header("换装过渡时长（表现层按此对齐动画播放速度，按手感调）")]
+        [Tooltip("收起旧武器的时长；0 = 不做收武器表现，直接落位")]
+        [SerializeField] private float putDuration = 0.55f;
+        [Tooltip("掏出新武器的时长；0 = 不做掏出表现")]
+        [SerializeField] private float takeDuration = 0.75f;
+
         private const float DEFAULT_ATTACK_INTERVAL = 0.5f; // 旧资产缺少新字段时的安全回退值
         private const float MIN_ATTACK_INTERVAL = 0.01f;    // 防止异常倍率产生零间隔
         private const float DROP_FORWARD_DISTANCE = 0.8f;    // 丢弃武器时掉落在玩家前方距离
         private const int SLOT_COUNT = 3;                    // 与 WeaponSlot 枚举一一对应
+
+        // 空槽切换提示：预置常量而非运行时拼接，避免在输入路径上产生 GC；
+        // 下标必须与 WeaponSlot（Primary=0 / Secondary=1 / Melee=2）严格对应
+        private static readonly string[] EmptySlotToasts =
+        {
+            "「主武器」槽位没有武器",
+            "「副武器」槽位没有武器",
+            "「近战」槽位没有武器"
+        };
+
+        // 「已经拿着这把武器」的提示前缀（后缀由武器名 + 一个右书名号补全）。
+        // 与 EmptySlotToasts 同一个理由：同槽重复切换同样不能静默——
+        // 「我按了 1 却没反应」里有一半其实是「本来就已经拿着枪」，玩家分不出来。
+        private const string AlreadyEquippedToastPrefix = "已经拿着「";
+
+        /// <summary> 换装过渡的两个阶段；None 表示空闲——只有空闲时才允许攻击 </summary>
+        private enum SwitchPhase { None, Put, Take }
 
         private CharacterRoot _character;
         private CharacterStateCoordinator _coordinator;
@@ -35,8 +57,15 @@ namespace Role.Controllers
         private float _switchTimer;
         private WeaponConfig _pendingWeapon;
 
+        // 换装分两段：Put（收旧武器，此时动画集还没换）→ 落位 → Take（掏新武器）。
+        // 只用一个计时器 + 一个阶段标志，不给两段各维护一份状态。
+        private SwitchPhase _phase = SwitchPhase.None;
+
         /// <summary> 当前角色武器切换完成；供 CharacterRoot 路由内部表现状态 </summary>
         public event Action<WeaponConfig, WeaponConfig> WeaponEquipped;
+
+        /// <summary> 即将收起当前武器（换装第一段开始）；表现层据此在旧动画集上播「收武器」 </summary>
+        public event Action<WeaponConfig> UnequipStarted;
 
         /// <summary> 当前角色成功提交一次攻击；冷却或状态阻断时不触发 </summary>
         public event Action<WeaponConfig> AttackCommitted;
@@ -46,7 +75,13 @@ namespace Role.Controllers
         public WeaponConfig CurrentWeapon => _currentWeapon;
         public IWeaponBehavior CurrentBehavior => _currentBehavior;
         public Transform RightHandAttachPoint => rightHandAttachPoint;
-        public bool IsSwitching => _switchTimer > 0f;
+        public bool IsSwitching => _phase != SwitchPhase.None;
+
+        /// <summary> 收起旧武器的时长；表现层按此对齐收武器动画的播放速度 </summary>
+        public float PutDuration => putDuration;
+
+        /// <summary> 掏出新武器的时长；表现层按此对齐掏出动画的播放速度 </summary>
+        public float TakeDuration => takeDuration;
         public bool UsesContinuousAttackInput => _currentWeapon != null
             && _currentWeapon.type == WeaponType.Ranged
             && _currentWeapon.isAutomatic;
@@ -80,11 +115,20 @@ namespace Role.Controllers
 
         private void Update()
         {
-            if (!IsSwitching) return;
+            if (_phase == SwitchPhase.None) return;
 
             _switchTimer -= Time.deltaTime;
-            if (_switchTimer <= 0f)
+            if (_switchTimer > 0f) return;
+
+            if (_phase == SwitchPhase.Put)
+            {
+                // 收武器演完才真正落位：此刻才换动画集与武器模型，并由 ApplyEquipped 进入 Take 阶段
                 CompleteSwitch();
+                return;
+            }
+
+            // Take 演完：恢复可攻击
+            _phase = SwitchPhase.None;
         }
 
         /// <summary> 拾取武器：落入归属槽位（同槽覆盖），并自动切换装备。Editor 调试菜单直接覆盖用 </summary>
@@ -105,6 +149,12 @@ namespace Role.Controllers
         public bool HasWeaponInSlot(WeaponSlot slot)
         {
             return TryGetSlotIndex(slot, out int index) && _slots[index] != null;
+        }
+
+        /// <summary> 读取指定槽位里的武器；空槽或槽位非法返回 null（供武器栏 UI 与调试查询） </summary>
+        public WeaponConfig GetWeaponInSlot(WeaponSlot slot)
+        {
+            return TryGetSlotIndex(slot, out int index) ? _slots[index] : null;
         }
 
         /// <summary>
@@ -135,8 +185,8 @@ namespace Role.Controllers
         }
 
         /// <summary>
-        /// 丢弃当前武器：清空槽位、打断切换、在玩家前方生成可再拾取的掉落物。
-        /// 无当前武器时返回 false 并提示。
+        /// 丢弃当前武器：清空该槽位、在玩家前方生成可再拾取的掉落物，
+        /// 然后自动接替剩余槽位里的武器（见 FindFallbackWeapon）。无当前武器时返回 false 并提示。
         /// </summary>
         public bool Drop()
         {
@@ -147,25 +197,48 @@ namespace Role.Controllers
             }
             if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
 
-            // 丢弃会打断尚未完成的切换
-            _pendingWeapon = null;
-            _switchTimer = 0f;
-
             WeaponConfig dropped = _currentWeapon;
 
             _slots[index] = null;
             _nextAttackAllowedTimes[index] = 0f;
-            _currentWeapon = null;
-            _currentBehavior = null;
-
-            // 表现层回到空手姿态（复用装备事件，newWeapon=null）
-            OnWeaponEquipped(dropped, null);
-            WeaponEquipped?.Invoke(dropped, null);
-            EventBus.Emit(EventName.Weapon_Equipped, dropped, null);
-            EventBus.Emit(EventName.Weapon_Dropped, dropped);
 
             SpawnDroppedPickup(dropped);
+
+            // 丢完立刻接替剩余槽位里的武器：近战（Weapon_Saw）是开局默认装备、一直压在 Melee 槽里，
+            // 所以丢枪的正确表现是「掏出刀」而不是「变成空手」。三个槽都空才是真·空手（newWeapon=null）。
+            //
+            // 这里直接落位、不走 SWITCH_DURATION：丢弃是瞬时行为，拖 0.3s 会变成
+            // 「枪已经躺地上了、手里还举着枪」，动画集与武器模型都要等半拍才跟。
+            ApplyEquipped(dropped, FindFallbackWeapon());
+
+            EventBus.Emit(EventName.Weapon_Dropped, dropped);
             return true;
+        }
+
+        /// <summary>
+        /// 丢弃后要接替的武器：优先另一个枪械槽（保住远程档位），都没有才回退近战槽。
+        /// 返回 null 表示三个槽全空——真·空手。
+        /// </summary>
+        private WeaponConfig FindFallbackWeapon()
+        {
+            WeaponConfig melee = null;
+
+            for (int i = 0; i < SLOT_COUNT; i++)
+            {
+                WeaponConfig candidate = _slots[i];
+                if (candidate == null) continue;
+
+                // 近战只作为兜底先记下不返回：手上还有枪时不该因为丢了一把就掉到刀
+                if (candidate.type == WeaponType.Melee)
+                {
+                    melee = candidate;
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return melee;
         }
 
         /// <summary> 在玩家前方地面生成可拾取的武器掉落物（无模型时仍可交互拾取） </summary>
@@ -204,37 +277,96 @@ namespace Role.Controllers
             if (!TryGetSlotIndex(slot, out int index)) return;
 
             WeaponConfig target = _slots[index];
-            if (target == null) return;
+            if (target == null)
+            {
+                // 不能静默 return：玩家分不清「这个槽是空的」和「按键没生效」，
+                // 两种情况在表现上一模一样（按了没反应），会被当成输入失灵。
+                EventBus.Emit(EventName.UI_Toast, EmptySlotToasts[index]);
+                return;
+            }
 
-            // 重复请求同一目标不重置计时；切回当前武器则取消尚未完成的切换
-            if (ReferenceEquals(target, _pendingWeapon) && IsSwitching) return;
+            // 重复请求同一目标：不重置已经开始的收武器计时
+            if (_phase == SwitchPhase.Put && ReferenceEquals(target, _pendingWeapon)) return;
+
             if (ReferenceEquals(target, _currentWeapon))
             {
-                _pendingWeapon = null;
-                _switchTimer = 0f;
+                // Take 阶段目标就是手上这把：等掏出动作演完，提前取消会变成「抽到一半又放下」
+                if (_phase == SwitchPhase.Take) return;
+
+                CancelSwitch();
+
+                // 「已经拿着它」不能静默：玩家会把它读成「按键没生效」。
+                // 拼接只发生在按 1/2/3 与拾取这类离散输入上，不在每帧热点里。
+                EventBus.Emit(EventName.UI_Toast, AlreadyEquippedToastPrefix + target.weaponName + "」");
+                return;
+            }
+
+            BeginSwitch(target);
+        }
+
+        /// <summary> 开始换装第一段：演「收武器」；没武器可收或 putDuration 为 0 时跳过，直接落位 </summary>
+        private void BeginSwitch(WeaponConfig target)
+        {
+            // _currentWeapon == null 覆盖「开局首次装备」与「空手捡枪」：手上本来就空的，
+            // 没有收武器可演；否则出生后要白等 0.55 秒才拿上武器
+            if (_currentWeapon == null || putDuration <= 0f)
+            {
+                ApplyEquipped(_currentWeapon, target);
                 return;
             }
 
             _pendingWeapon = target;
-            _switchTimer = SWITCH_DURATION;
+            _phase = SwitchPhase.Put;
+            _switchTimer = putDuration;
+
+            // 此时动画集还是旧的：表现层在旧动画集上播收武器，收完才由 CompleteSwitch 落位
+            UnequipStarted?.Invoke(_currentWeapon);
+        }
+
+        /// <summary> 取消尚未落位的切换（只可能发生在 Put 阶段） </summary>
+        private void CancelSwitch()
+        {
+            _pendingWeapon = null;
+            _phase = SwitchPhase.None;
+            _switchTimer = 0f;
         }
 
         private void CompleteSwitch()
         {
-            if (_pendingWeapon == null) return;
-
-            WeaponConfig oldWeapon = _currentWeapon;
-            WeaponConfig newWeapon = _pendingWeapon;
-
-            _currentSlot = newWeapon.slot;
-            _currentWeapon = newWeapon;
-            _currentBehavior = CreateBehavior(newWeapon.type);
+            WeaponConfig target = _pendingWeapon;
             _pendingWeapon = null;
-            _switchTimer = 0f;
+
+            if (target == null)
+            {
+                _phase = SwitchPhase.None;
+                return;
+            }
+
+            ApplyEquipped(_currentWeapon, target);
+        }
+
+        /// <summary>
+        /// 让一次装备变更真正生效：写入当前槽位/武器/行为策略，并广播三层事件。
+        /// 由「切换完成」与「丢弃后自动接替」共用；newWeapon 为 null 表示空手，此时槽位索引保持不变。
+        /// 落位后自动进入 Take 阶段（掏出新武器），掏出途中 IsSwitching 为 true，不能攻击。
+        /// </summary>
+        private void ApplyEquipped(WeaponConfig oldWeapon, WeaponConfig newWeapon)
+        {
+            if (newWeapon != null)
+                _currentSlot = newWeapon.slot;
+
+            _currentWeapon = newWeapon;
+            _currentBehavior = newWeapon != null ? CreateBehavior(newWeapon.type) : null;
+            _pendingWeapon = null;
 
             OnWeaponEquipped(oldWeapon, newWeapon);
             WeaponEquipped?.Invoke(oldWeapon, newWeapon);
             EventBus.Emit(EventName.Weapon_Equipped, oldWeapon, newWeapon);
+
+            // 落位后统一进入「掏出新武器」阶段——表现层已在 WeaponEquipped 回调里触发了掏武器动画，
+            // 这里只负责让逻辑层继续锁住攻击，直到动画演完
+            _phase = takeDuration > 0f ? SwitchPhase.Take : SwitchPhase.None;
+            _switchTimer = takeDuration > 0f ? takeDuration : 0f;
         }
 
         private static bool TryGetSlotIndex(WeaponSlot slot, out int index)

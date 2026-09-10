@@ -30,6 +30,8 @@ namespace Combat
 
         [Header("表现层（回家后填）")]
         public GameObject modelPrefab;  // 武器模型，挂到右手挂点
-        public int animPoseParam;       // Animator 姿态参数值（0=空手 1=近战 2=枪械）
+
+        [Tooltip("这把武器使用的 Animator 控制器；留空则按 type 回退到 CharacterAnimationController 上的默认集")]
+        public RuntimeAnimatorController animatorController;
     }
 }
