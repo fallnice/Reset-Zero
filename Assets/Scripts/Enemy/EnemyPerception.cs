@@ -11,6 +11,7 @@ namespace Enemy
     {
         private CharacterRoot _target;
         private float _distanceToTarget;
+        private float _nextSearchTime;
 
         /// <summary> 当前锁定目标；无目标时为 null </summary>
         public CharacterRoot Target => _target;
@@ -28,7 +29,12 @@ namespace Enemy
 
             if (_target == null)
             {
-                TryAcquire(self, config.detectionRange);
+                // 无目标时按固定间隔搜索，避免多个待机敌人每帧 FindObjectsOfType 产生数组分配
+                if (Time.time >= _nextSearchTime)
+                {
+                    _nextSearchTime = Time.time + config.perceptionSearchInterval;
+                    TryAcquire(self, config.detectionRange);
+                }
             }
             else
             {

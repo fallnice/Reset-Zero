@@ -1,5 +1,6 @@
 using UnityEngine;
 using Role;
+using Enemy.Navigation;
 
 namespace Enemy
 {
@@ -14,37 +15,83 @@ namespace Enemy
 
     /// <summary>
     /// 敌人 AI 大脑——感知 → 决策 → 输出到 AIInputProvider。
-    /// 复用 CharacterRoot 的移动/战斗链路，不直接操作状态机或武器；
-    /// 决策只产出「移动方向 + 是否攻击」，与玩家输入同构。
+    /// 导航只产生方向，最终仍由 CharacterRoot → CharacterController.Move() 执行位移。
     /// </summary>
+    [DefaultExecutionOrder(-50)]
+    [RequireComponent(typeof(CharacterRoot))]
     [RequireComponent(typeof(AIInputProvider))]
     public class EnemyBrain : MonoBehaviour
     {
         [SerializeField] private EnemyConfig config;
+        [Tooltip("可选：拖入同物体的 GridAStarNavigation；为空时自动查找，仍无则回退 DirectNavigation")]
+        [SerializeField] private MonoBehaviour navigationSource;
 
         private CharacterRoot _character;
         private AIInputProvider _aiInput;
         private readonly EnemyPerception _perception = new EnemyPerception();
-        private DirectNavigation _navigation;
+        private IEnemyNavigation _navigation;
 
         private EnemyAIState _state = EnemyAIState.Idle;
         private float _nextAttackTime;
 
         /// <summary> 当前决策状态（供调试/表现层查询） </summary>
         public EnemyAIState CurrentState => _state;
+        /// <summary> 当前导航状态（供调试/场景诊断查询） </summary>
+        public EnemyNavigationStatus NavigationStatus => _navigation != null
+            ? _navigation.Status
+            : EnemyNavigationStatus.Failed;
 
         private void Awake()
         {
             _character = GetComponent<CharacterRoot>();
             _aiInput = GetComponent<AIInputProvider>();
-            _navigation = new DirectNavigation(config);
+            ResolveNavigation();
+            _navigation?.Initialize(transform, GetComponent<CharacterController>(), config);
+        }
+
+        /// <summary> 显式引用优先，其次自动查找接口组件；旧 Prefab 无 A* 组件时兼容回退直线导航 </summary>
+        private void ResolveNavigation()
+        {
+            if (navigationSource != null)
+            {
+                _navigation = navigationSource as IEnemyNavigation;
+                if (_navigation == null)
+                    Debug.LogError("[EnemyBrain] Navigation Source 未实现 IEnemyNavigation，将回退 DirectNavigation", this);
+            }
+
+            if (_navigation == null)
+            {
+                MonoBehaviour[] components = GetComponents<MonoBehaviour>();
+                for (int i = 0; i < components.Length; i++)
+                {
+                    if (components[i] is IEnemyNavigation candidate)
+                    {
+                        _navigation = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (_navigation == null)
+                _navigation = new DirectNavigation(config);
         }
 
         private void Start()
         {
             // 开局装备初始近战武器，让攻击链路可复用（equipmentCtrl 已在 CharacterRoot.Awake 完成 Init）
-            if (config != null && config.meleeWeapon != null && _character != null)
-                _character.Equipment?.Pickup(config.meleeWeapon);
+            if (_character == null || config == null) return;
+            if (_character.Equipment == null)
+            {
+                Debug.LogWarning("[EnemyBrain] 缺少 EquipmentController，敌人无法攻击", this);
+                return;
+            }
+            if (config.meleeWeapon == null)
+            {
+                Debug.LogWarning("[EnemyBrain] EnemyConfig 未配置 Melee Weapon，敌人无法攻击", this);
+                return;
+            }
+            if (!_character.Equipment.Pickup(config.meleeWeapon))
+                Debug.LogWarning("[EnemyBrain] 初始武器装备失败，敌人无法攻击", this);
         }
 
         private void Update()
@@ -81,7 +128,8 @@ namespace Enemy
                 case EnemyAIState.Chase:
                     if (!_perception.HasTarget)
                         SetState(EnemyAIState.Idle);
-                    else if (_perception.DistanceToTarget <= config.attackRange)
+                    else if (_perception.DistanceToTarget <= config.attackRange
+                        && _navigation.HasReachedDestination)
                         SetState(EnemyAIState.Attack);
                     break;
 
@@ -94,27 +142,39 @@ namespace Enemy
             }
         }
 
-        /// <summary> 执行当前状态：把意图写入 AIInputProvider，交由 CharacterRoot 消费 </summary>
+        /// <summary> 执行当前状态：主动驱动导航，再把移动/攻击意图写入 AIInputProvider </summary>
         private void ExecuteState()
         {
             switch (_state)
             {
                 case EnemyAIState.Idle:
+                    _navigation.Stop();
                     _aiInput.SetMoveDirection(Vector3.zero);
                     _aiInput.SetLookDirection(_character.transform.forward);
                     break;
 
                 case EnemyAIState.Chase:
                     {
-                        Vector3 move = _navigation.ComputeMoveDirection(
-                            _character.transform, _perception.Target.transform.position);
-                        _aiInput.SetMoveDirection(move);
-                        _aiInput.SetLookDirection(move);
+                        _navigation.SetDestination(_perception.Target.transform.position);
+                        if (_character.CanMove)
+                        {
+                            _navigation.Tick(Time.deltaTime);
+                            Vector3 move = _navigation.MoveDirection;
+                            _aiInput.SetMoveDirection(move);
+                            if (move.sqrMagnitude > 0.0001f)
+                                _aiInput.SetLookDirection(move);
+                        }
+                        else
+                        {
+                            // 死亡/眩晕等强状态下暂停 Tick，避免静止被误诊为卡住
+                            _aiInput.SetMoveDirection(Vector3.zero);
+                        }
                     }
                     break;
 
                 case EnemyAIState.Attack:
                     {
+                        _navigation.Stop();
                         Vector3 toTarget = _perception.Target.transform.position - _character.transform.position;
                         toTarget.y = 0f;
                         if (toTarget.sqrMagnitude > 0.0001f)
@@ -126,7 +186,6 @@ namespace Enemy
                         }
 
                         _aiInput.SetMoveDirection(Vector3.zero);
-
                         if (Time.time >= _nextAttackTime)
                         {
                             _aiInput.SetAttackPressed(true);
@@ -136,6 +195,7 @@ namespace Enemy
                     break;
 
                 case EnemyAIState.Dead:
+                    _navigation.Stop();
                     _aiInput.SetMoveDirection(Vector3.zero);
                     break;
             }

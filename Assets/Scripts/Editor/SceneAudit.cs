@@ -1,5 +1,8 @@
 #if UNITY_EDITOR
+using Combat;
 using Core;
+using Enemy;
+using Enemy.Navigation;
 using Role;
 using Role.Input;
 using Role.Interaction;
@@ -117,8 +120,14 @@ namespace EditorTools
             var sb = new StringBuilder();
             int totalPass = 0;
             int totalFail = 0;
+            List<string> targetScenes = GetTargetScenes();
+            if (targetScenes.Count == 0)
+            {
+                totalFail++;
+                sb.AppendLine("[FAIL] 目标场景: 未找到可自检场景（检查 SCENE_AUDIT_SCENE、Build Settings 或 Assets/Scenes）");
+            }
 
-            foreach (string scenePath in GetTargetScenes())
+            foreach (string scenePath in targetScenes)
             {
                 sb.AppendLine($"=== Scene: {scenePath} ===");
 
@@ -209,6 +218,8 @@ namespace EditorTools
             RegisterChecker("CraftView 引用完整", CheckCraftViewRefs);
             RegisterChecker("ToastView 存在", CheckToastView);
             RegisterChecker("CameraFollow 引用完整", CheckCameraFollow);
+            RegisterChecker("敌人 AI 组件完整", CheckEnemyAI);
+            RegisterChecker("A* 导航网格配置", CheckEnemyNavigationGrid);
         }
 
         /// <summary> 启动入口：GameRoot 缺失 = 无任何模块初始化 </summary>
@@ -283,6 +294,102 @@ namespace EditorTools
             if (GetRef(so, "target") == null)
                 return new CheckResult(false, "CameraFollow.target 未赋值（相机不跟随角色）");
             return new CheckResult(true, "CameraFollow 存在且 target 已赋值");
+        }
+
+        /// <summary> 敌人 AI：Brain 的角色/输入/配置缺一都会静默失效 </summary>
+        private static CheckResult CheckEnemyAI()
+        {
+            EnemyBrain[] brains = UnityEngine.Object.FindObjectsOfType<EnemyBrain>(true);
+            if (brains.Length == 0)
+                return new CheckResult(true, "场景未启用敌人 AI，跳过组件检查");
+
+            var issues = new List<string>();
+            for (int i = 0; i < brains.Length; i++)
+            {
+                EnemyBrain brain = brains[i];
+                if (brain.GetComponent<CharacterRoot>() == null)
+                    issues.Add($"{brain.name}: 缺少 CharacterRoot");
+                if (brain.GetComponent<AIInputProvider>() == null)
+                    issues.Add($"{brain.name}: 缺少 AIInputProvider");
+                if (brain.GetComponent<CharacterController>() == null)
+                    issues.Add($"{brain.name}: 缺少 CharacterController");
+                if (brain.GetComponent<Role.Controllers.EquipmentController>() == null)
+                    issues.Add($"{brain.name}: 缺少 EquipmentController");
+
+                CharacterRoot root = brain.GetComponent<CharacterRoot>();
+                if (root != null)
+                {
+                    var rootSo = new SerializedObject(root);
+                    SerializedProperty playerControlled = rootSo.FindProperty("isPlayerControlled");
+                    SerializedProperty faction = rootSo.FindProperty("faction");
+                    if (playerControlled == null || playerControlled.boolValue)
+                        issues.Add($"{brain.name}: CharacterRoot.IsPlayerControlled 必须关闭");
+                    if (faction == null || faction.enumValueIndex != (int)Faction.Enemy)
+                        issues.Add($"{brain.name}: CharacterRoot.Faction 必须为 Enemy");
+                }
+
+                var so = new SerializedObject(brain);
+                EnemyConfig config = GetRef(so, "config") as EnemyConfig;
+                if (config == null)
+                {
+                    issues.Add($"{brain.name}: EnemyConfig 未赋值");
+                }
+                else
+                {
+                    if (config.navigationStoppingDistance > config.attackRange)
+                        issues.Add($"{brain.name}: navigationStoppingDistance 必须 <= attackRange");
+                    if (config.meleeWeapon == null)
+                        issues.Add($"{brain.name}: EnemyConfig.meleeWeapon 未赋值");
+                    else if (config.meleeWeapon.type != WeaponType.Melee)
+                        issues.Add($"{brain.name}: EnemyConfig.meleeWeapon 必须是 Melee 类型");
+                }
+
+                UnityEngine.Object source = GetRef(so, "navigationSource");
+                if (source != null && !(source is IEnemyNavigation))
+                    issues.Add($"{brain.name}: Navigation Source 未实现 IEnemyNavigation");
+            }
+
+            return issues.Count == 0
+                ? new CheckResult(true, $"{brains.Length} 个 EnemyBrain 组件与配置完整")
+                : new CheckResult(false, string.Join("；", issues));
+        }
+
+        /// <summary> A*：存在 GridAStarNavigation 时必须且只能有一个有效场景网格 </summary>
+        private static CheckResult CheckEnemyNavigationGrid()
+        {
+            GridAStarNavigation[] navigations = UnityEngine.Object.FindObjectsOfType<GridAStarNavigation>(true);
+            if (navigations.Length == 0)
+                return new CheckResult(true, "场景未启用 GridAStarNavigation，当前使用 DirectNavigation 回退");
+
+            EnemyNavigationGrid[] grids = UnityEngine.Object.FindObjectsOfType<EnemyNavigationGrid>(true);
+            if (grids.Length != 1)
+                return new CheckResult(false, $"启用 A* 时场景应有且仅有 1 个 EnemyNavigationGrid，当前={grids.Length}");
+            if (!grids[0].enabled || !grids[0].gameObject.activeInHierarchy)
+                return new CheckResult(false, "EnemyNavigationGrid 未启用");
+            if (grids[0].transform.rotation != Quaternion.identity || grids[0].transform.lossyScale != Vector3.one)
+                return new CheckResult(false, "EnemyNavigationGrid 必须保持 Rotation=0、Scale=1");
+
+            EnemyBrain[] brains = UnityEngine.Object.FindObjectsOfType<EnemyBrain>(true);
+            for (int i = 0; i < brains.Length; i++)
+            {
+                if (brains[i].GetComponent<GridAStarNavigation>() == null)
+                    return new CheckResult(false, $"{brains[i].name}: 缺少 GridAStarNavigation，仍会回退 DirectNavigation");
+            }
+
+            var so = new SerializedObject(grids[0]);
+            SerializedProperty ground = so.FindProperty("walkableGroundMask");
+            SerializedProperty obstacle = so.FindProperty("navigationObstacleMask");
+            int groundMask = ground != null ? ground.intValue : 0;
+            int obstacleMask = obstacle != null ? obstacle.intValue : 0;
+            if (groundMask == 0)
+                return new CheckResult(false, "EnemyNavigationGrid.walkableGroundMask 为空");
+            if (obstacleMask == 0)
+                return new CheckResult(false, "EnemyNavigationGrid.navigationObstacleMask 为空，墙体不会参与寻路");
+            if ((groundMask & obstacleMask) != 0)
+                return new CheckResult(false, "EnemyNavigationGrid 的 Ground/Obstacle Mask 重叠");
+
+            return new CheckResult(true,
+                $"A* 配置有效：1 个网格，{navigations.Length} 个 GridAStarNavigation");
         }
 
         /// <summary>

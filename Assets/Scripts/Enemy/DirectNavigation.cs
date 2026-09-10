@@ -1,40 +1,81 @@
 using UnityEngine;
+using Enemy.Navigation;
 
 namespace Enemy
 {
     /// <summary>
-    /// 直线导航——朝目标水平方向移动，前方有障碍时横向偏转绕过。
-    /// 垂直切片的最简实现；后续替换为 IEnemyNavigation + A*（补路径重算节流与卡住诊断）。
+    /// 直线导航——IEnemyNavigation 的兼容回退实现。
+    /// 旧 Prefab 未挂 GridAStarNavigation 时仍可使用；只适合无障碍小场地。
     /// </summary>
-    public class DirectNavigation
+    public class DirectNavigation : IEnemyNavigation
     {
-        private readonly EnemyConfig _config;
+        private Transform _agent;
+        private EnemyConfig _config;
+        private Vector3 _destination;
+        private bool _hasDestination;
+
+        public Vector3 MoveDirection { get; private set; }
+        public Vector3 Destination => _destination;
+        public EnemyNavigationStatus Status { get; private set; } = EnemyNavigationStatus.Idle;
+        public EnemyNavigationFailure LastFailure => EnemyNavigationFailure.None;
+        public bool HasReachedDestination => Status == EnemyNavigationStatus.Reached;
+        public bool HasFailed => false;
+        public bool IsStuck => false;
 
         public DirectNavigation(EnemyConfig config)
         {
             _config = config;
         }
 
-        /// <summary> 计算本帧移动方向（世界空间，已归一化） </summary>
-        public Vector3 ComputeMoveDirection(Transform self, Vector3 targetPosition)
+        public void Initialize(Transform agent, CharacterController controller, EnemyConfig config)
         {
-            Vector3 toTarget = targetPosition - self.position;
-            toTarget.y = 0f;
-            if (toTarget.sqrMagnitude < 0.0001f) return Vector3.zero;
+            _agent = agent;
+            _config = config;
+        }
 
-            Vector3 dir = toTarget.normalized;
-            if (_config == null) return dir;
+        public void SetDestination(Vector3 destination)
+        {
+            _destination = destination;
+            _hasDestination = true;
+        }
 
-            // 前方障碍检测：从胸口高度向前打射线；命中障碍则向右侧偏转绕过。
-            // 攻击距离（约 2m）大于检测距离（约 1.5m），追击阶段不会把目标自身当成障碍。
-            Vector3 origin = self.position + Vector3.up * 0.6f;
-            if (Physics.Raycast(origin, dir, out RaycastHit _, _config.obstacleAvoidDistance))
+        public void Tick(float deltaTime)
+        {
+            if (!_hasDestination || _agent == null || _config == null)
             {
-                Vector3 right = Vector3.Cross(Vector3.up, dir);
-                dir = (dir + right * 0.8f).normalized;
+                MoveDirection = Vector3.zero;
+                return;
             }
 
-            return dir;
+            Vector3 toTarget = _destination - _agent.position;
+            toTarget.y = 0f;
+            float stoppingDistance = Mathf.Min(_config.navigationStoppingDistance, _config.attackRange);
+            if (toTarget.sqrMagnitude <= stoppingDistance * stoppingDistance)
+            {
+                MoveDirection = Vector3.zero;
+                Status = EnemyNavigationStatus.Reached;
+                return;
+            }
+
+            Vector3 direction = toTarget.normalized;
+            Vector3 origin = _agent.position + Vector3.up * 0.6f;
+            if (_config.navigationObstacleMask.value != 0
+                && Physics.Raycast(origin, direction, out RaycastHit _, _config.obstacleAvoidDistance,
+                    _config.navigationObstacleMask, QueryTriggerInteraction.Ignore))
+            {
+                Vector3 right = Vector3.Cross(Vector3.up, direction);
+                direction = (direction + right * 0.8f).normalized;
+            }
+
+            MoveDirection = direction;
+            Status = EnemyNavigationStatus.Moving;
+        }
+
+        public void Stop()
+        {
+            _hasDestination = false;
+            MoveDirection = Vector3.zero;
+            Status = EnemyNavigationStatus.Idle;
         }
     }
 }

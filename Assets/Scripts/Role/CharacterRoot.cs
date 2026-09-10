@@ -63,6 +63,9 @@ namespace Role
         /// <summary> 生命组件（未找到时为 null） </summary>
         public HealthController Health => health;
 
+        /// <summary> 当前强状态是否允许移动；导航据此暂停卡住计时 </summary>
+        public bool CanMove => coordinator == null || coordinator.CanMove;
+
         // ===== Unity 生命周期 =====
 
         private void Awake()
