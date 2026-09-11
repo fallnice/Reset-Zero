@@ -75,6 +75,9 @@ namespace Role
         /// <summary> 当前强状态是否允许移动；导航据此暂停卡住计时 </summary>
         public bool CanMove => coordinator == null || coordinator.CanMove;
 
+        /// <summary> 角色强状态协调器（供敌人 AI 判断死亡/眩晕等强状态） </summary>
+        public CharacterStateCoordinator Coordinator => coordinator;
+
         // ===== Unity 生命周期 =====
 
         private void Awake()

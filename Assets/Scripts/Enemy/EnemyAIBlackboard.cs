@@ -126,6 +126,22 @@ namespace Enemy
             LastKnownTargetPosition = Vector3.zero;
         }
 
+        /// <summary>
+        /// 复活/池化复用时清空全部感知事实，避免带着上一轮的目标与怀疑度进入新生命周期。
+        /// 调查结束、彻底失去线索时也调用它，否则黑板会一直认为「还记得位置」。
+        /// </summary>
+        public void Reset()
+        {
+            ClearTarget();
+            ClearHeardClue();
+            LastHeardPosition = Vector3.zero;
+            Suspicion = 0f;
+            TimeSinceLastSeen = 0f;
+            Cover = CoverStatus.None;
+            Threat = ThreatLevel.Low;
+            HealthRatio = 1f;
+        }
+
         /// <summary> 设置掩体与威胁评估 </summary>
         public void SetTacticalInfo(CoverStatus cover, ThreatLevel threat)
         {

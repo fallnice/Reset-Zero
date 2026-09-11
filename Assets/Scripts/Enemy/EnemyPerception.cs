@@ -31,10 +31,19 @@ namespace Enemy
         /// <summary> 到当前目标的距离（仅在有目标时有效） </summary>
         public float DistanceToTarget => _distanceToTarget;
 
+        /// <summary> 复活/池化复用时清空内部锁定目标与搜索节奏 </summary>
+        public void Reset()
+        {
+            _target = null;
+            _distanceToTarget = 0f;
+            _nextSearchTime = 0f;
+            _suspicion = 0f;
+        }
+
         /// <summary> 每帧更新：推进黑板计时 → 刷新目标 → 计算视线/怀疑度 → 写入黑板 </summary>
         public void Update(CharacterRoot self, EnemyConfig config, EnemyAIBlackboard blackboard)
         {
-            if (config == null || blackboard == null) return;
+            if (self == null || config == null || blackboard == null) return;
 
             blackboard.BeginUpdate(self);
 

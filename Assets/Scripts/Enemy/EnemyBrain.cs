@@ -1,16 +1,22 @@
 using UnityEngine;
 using Role;
+using Role.Core;
 using Enemy.Navigation;
+using Enemy.States;
 
 namespace Enemy
 {
     /// <summary> 敌人 AI 决策状态 </summary>
     public enum EnemyAIState
     {
-        Idle,   // 待机：无目标，原地待命
-        Chase,  // 追击：向目标移动
-        Attack, // 攻击：面向目标，按冷却触发近战攻击
-        Dead    // 死亡：停止一切输出
+        Idle,        // 待机：原地警戒
+        Patrol,      // 巡逻：出生点周围随机走动
+        Chase,       // 追击：向目标（或最后已知位置）移动
+        Attack,      // 攻击：面向目标，按冷却触发近战攻击
+        Investigate, // 调查：前往最后已知位置/听觉线索并搜索
+        ReturnHome,  // 归位：返回出生点，避免被拉离防区
+        Stunned,     // 眩晕：强状态，暂停一切决策
+        Dead         // 死亡：终态，停止一切输出
     }
 
     /// <summary>
@@ -35,11 +41,20 @@ namespace Enemy
         /// <summary> 决策黑板（供调试/表现层与后续 Utility 读取） </summary>
         public EnemyAIBlackboard Blackboard => _blackboard;
 
-        private EnemyAIState _state = EnemyAIState.Idle;
-        private float _nextAttackTime;
+        private readonly EnemyAIContext _aiContext = new EnemyAIContext();
+        private IEnemyState _currentState;
+
+        private readonly IdleState _idleState = new IdleState();
+        private readonly PatrolState _patrolState = new PatrolState();
+        private readonly ChaseState _chaseState = new ChaseState();
+        private readonly AttackState _attackState = new AttackState();
+        private readonly InvestigateState _investigateState = new InvestigateState();
+        private readonly ReturnHomeState _returnHomeState = new ReturnHomeState();
+        private readonly StunnedState _stunnedState = new StunnedState();
+        private readonly DeadState _deadState = new DeadState();
 
         /// <summary> 当前决策状态（供调试/表现层查询） </summary>
-        public EnemyAIState CurrentState => _state;
+        public EnemyAIState CurrentState => _currentState != null ? _currentState.Kind : EnemyAIState.Idle;
         /// <summary> 当前导航状态（供调试/场景诊断查询） </summary>
         public EnemyNavigationStatus NavigationStatus => _navigation != null
             ? _navigation.Status
@@ -51,6 +66,9 @@ namespace Enemy
             _aiInput = GetComponent<AIInputProvider>();
             ResolveNavigation();
             _navigation?.Initialize(transform, GetComponent<CharacterController>(), config);
+
+            // 出生点用于 Patrol 取点与 ReturnHome 判定
+            _aiContext.HomePosition = transform.position;
         }
 
         /// <summary> 显式引用优先，其次自动查找接口组件；旧 Prefab 无 A* 组件时兼容回退直线导航 </summary>
@@ -110,121 +128,149 @@ namespace Enemy
 
             // 重置本帧攻击意图：由决策循环统一管理边缘触发，避免 LateUpdate 清除的时序竞态
             _aiInput.SetAttackPressed(false);
+            _aiContext.BeginFrame();
 
-            // 死亡优先：角色死亡后停止感知与决策，只输出静止
+            // 每帧先刷新上下文，保证任何 OnEnter/OnUpdate 都读到本帧依赖
+            _aiContext.Character = _character;
+            _aiContext.AiInput = _aiInput;
+            _aiContext.Navigation = _navigation;
+            _aiContext.Blackboard = _blackboard;
+            _aiContext.Config = config;
+            _aiContext.DeltaTime = Time.deltaTime;
+            if (_aiContext.Grid == null)
+            {
+                // 与项目其它模块保持一致仍用 FindObjectOfType；无网格时 Grid 恒为 null，Patrol 会自动退回 Idle。
+                _aiContext.Grid = Object.FindObjectOfType<EnemyNavigationGrid>();
+            }
+
+            // 强状态优先：死亡 > 眩晕 > 常规决策
             if (_character.Health != null && _character.Health.IsDead)
             {
-                SetState(EnemyAIState.Dead);
+                TransitionTo(EnemyAIState.Dead);
+            }
+            else if (IsStunned())
+            {
+                TransitionTo(EnemyAIState.Stunned);
             }
             else
             {
-                // HealthController.ResetHealth 后允许池化敌人从 Dead 恢复决策与初始武器。
-                if (_state == EnemyAIState.Dead)
+                // HealthController.ResetHealth 后允许池化敌人从 Dead 恢复决策、初始武器与感知事实。
+                if (_currentState != null && _currentState.Kind == EnemyAIState.Dead)
                 {
-                    SetState(EnemyAIState.Idle);
+                    // 池化复用可能换个出生点，重设归位基准，避免以旧出生点判定「离家过远」
+                    _aiContext.HomePosition = transform.position;
+                    _aiContext.ResetTimers();
+                    _blackboard.Reset();
+                    _perception.Reset();
                     TryEquipInitialWeapon();
                 }
+
                 _perception.Update(_character, config, _blackboard);
-                DecideState();
+                TransitionTo(GetDesiredState());
             }
 
-            ExecuteState();
+            _aiContext.UpdateNavigationFailure(Time.deltaTime);
+            _currentState?.OnUpdate(_aiContext);
+
+            if (_aiContext.HasPendingTransition)
+                TransitionTo(_aiContext.PendingTransition);
+
+            if (config.debugDrawState && Time.frameCount % 30 == 0)
+                Debug.Log($"[EnemyBrain] {name} 状态={CurrentState} 导航={NavigationStatus}", this);
         }
 
-        /// <summary> 状态迁移：感知结果驱动 Idle/Chase/Attack 之间的切换 </summary>
-        private void DecideState()
+        private bool IsStunned()
         {
-            switch (_state)
-            {
-                case EnemyAIState.Idle:
-                    if (_blackboard.HasTarget)
-                        SetState(EnemyAIState.Chase);
-                    break;
-
-                case EnemyAIState.Chase:
-                    if (!_blackboard.HasTarget)
-                        SetState(EnemyAIState.Idle);
-                    else if (_blackboard.DistanceToTarget <= config.attackRange
-                        && _navigation.HasReachedDestination)
-                        SetState(EnemyAIState.Attack);
-                    break;
-
-                case EnemyAIState.Attack:
-                    if (!_blackboard.HasTarget)
-                        SetState(EnemyAIState.Idle);
-                    else if (_blackboard.DistanceToTarget > config.attackRange)
-                        SetState(EnemyAIState.Chase);
-                    break;
-            }
+            CharacterStateCoordinator coordinator = _character != null ? _character.Coordinator : null;
+            return coordinator != null && coordinator.CurrentState == CharacterState.Stunned;
         }
 
-        /// <summary> 执行当前状态：主动驱动导航，再把移动/攻击意图写入 AIInputProvider </summary>
-        private void ExecuteState()
+        /// <summary> 常规决策下的目标状态：由黑板中的目标与怀疑度决定 </summary>
+        private EnemyAIState GetDesiredState()
         {
-            switch (_state)
+            if (_currentState == null) return EnemyAIState.Idle;
+
+            switch (_currentState.Kind)
             {
-                case EnemyAIState.Idle:
-                    _navigation.Stop();
-                    _aiInput.SetMoveDirection(Vector3.zero);
-                    _aiInput.SetLookDirection(_character.transform.forward);
-                    break;
-
-                case EnemyAIState.Chase:
-                    {
-                        // 看得见就朝当前位置走；看不见则走向最后已知位置（4.2 感知扩展）
-                        Vector3 chaseDestination = _blackboard.HasLineOfSight
-                            ? _blackboard.Target.transform.position
-                            : _blackboard.LastKnownTargetPosition;
-                        _navigation.SetDestination(chaseDestination);
-                        if (_character.CanMove)
-                        {
-                            _navigation.Tick(Time.deltaTime);
-                            Vector3 move = _navigation.MoveDirection;
-                            _aiInput.SetMoveDirection(move);
-                            if (move.sqrMagnitude > 0.0001f)
-                                _aiInput.SetLookDirection(move);
-                        }
-                        else
-                        {
-                            // 死亡/眩晕等强状态下暂停 Tick，避免静止被误诊为卡住
-                            _aiInput.SetMoveDirection(Vector3.zero);
-                        }
-                    }
-                    break;
-
-                case EnemyAIState.Attack:
-                    {
-                        _navigation.Stop();
-                        Vector3 toTarget = _blackboard.Target.transform.position - _character.transform.position;
-                        toTarget.y = 0f;
-                        if (toTarget.sqrMagnitude > 0.0001f)
-                        {
-                            toTarget.Normalize();
-                            // 近战命中方向取决于角色朝向（attacker.forward），先转向目标再攻击
-                            _character.RotateToward(toTarget);
-                            _aiInput.SetLookDirection(toTarget);
-                        }
-
-                        _aiInput.SetMoveDirection(Vector3.zero);
-                        if (Time.time >= _nextAttackTime)
-                        {
-                            _aiInput.SetAttackPressed(true);
-                            _nextAttackTime = Time.time + config.attackCooldown;
-                        }
-                    }
-                    break;
-
                 case EnemyAIState.Dead:
-                    _navigation.Stop();
-                    _aiInput.SetMoveDirection(Vector3.zero);
-                    break;
+                    // 复活后回到待机，再由 Idle 自行进入巡逻
+                    return EnemyAIState.Idle;
+
+                case EnemyAIState.Stunned:
+                    return EnemyAIState.Idle;
+
+                case EnemyAIState.Idle:
+                    if (_blackboard.HasTarget) return EnemyAIState.Chase;
+                    if (_blackboard.Suspicion >= config.investigateSuspicionThreshold)
+                        return EnemyAIState.Investigate;
+                    return EnemyAIState.Idle;
+
+                case EnemyAIState.Patrol:
+                    if (_blackboard.HasTarget) return EnemyAIState.Chase;
+                    if (_blackboard.Suspicion >= config.investigateSuspicionThreshold)
+                        return EnemyAIState.Investigate;
+                    return EnemyAIState.Patrol;
+
+                case EnemyAIState.Chase:
+                    // 即使还有目标，离家过远也要先归位（与 ChaseState 内部判断保持一致）
+                    if (_aiContext.IsFarFromHome()) return EnemyAIState.ReturnHome;
+                    if (_blackboard.HasTarget) return EnemyAIState.Chase;
+                    return _blackboard.HasLastKnownPosition
+                        ? EnemyAIState.Investigate
+                        : EnemyAIState.ReturnHome;
+
+                case EnemyAIState.Attack:
+                    if (_blackboard.HasTarget) return EnemyAIState.Attack;
+                    return _blackboard.HasLastKnownPosition
+                        ? EnemyAIState.Investigate
+                        : EnemyAIState.ReturnHome;
+
+                case EnemyAIState.Investigate:
+                    if (_blackboard.HasTarget) return EnemyAIState.Chase;
+                    return EnemyAIState.Investigate;
+
+                case EnemyAIState.ReturnHome:
+                    // 归位途中重新发现目标时先判断是否已经回到防区：
+                    // 没回到防区就继续归位，避免与 Chase 的「离家过远」判定互顶。
+                    if (_blackboard.HasTarget && !_aiContext.IsFarFromHome())
+                        return EnemyAIState.Chase;
+                    return EnemyAIState.ReturnHome;
+
+                default:
+                    return EnemyAIState.Idle;
             }
         }
 
-        private void SetState(EnemyAIState newState)
+        private IEnemyState ResolveState(EnemyAIState kind)
         {
-            if (_state == newState) return;
-            _state = newState;
+            switch (kind)
+            {
+                case EnemyAIState.Idle: return _idleState;
+                case EnemyAIState.Patrol: return _patrolState;
+                case EnemyAIState.Chase: return _chaseState;
+                case EnemyAIState.Attack: return _attackState;
+                case EnemyAIState.Investigate: return _investigateState;
+                case EnemyAIState.ReturnHome: return _returnHomeState;
+                case EnemyAIState.Stunned: return _stunnedState;
+                case EnemyAIState.Dead: return _deadState;
+                default: return _idleState;
+            }
+        }
+
+        private void TransitionTo(EnemyAIState kind, bool force = false)
+        {
+            IEnemyState next = ResolveState(kind);
+            if (next == null) return;
+
+            if (_currentState == next)
+            {
+                if (force) next.OnEnter(_aiContext);
+                return;
+            }
+
+            _currentState?.OnExit(_aiContext);
+            _currentState = next;
+            next.OnEnter(_aiContext);
         }
 
         /// <summary> 决策调试可视化：视野锥、当前目标、最后已知位置与视线 </summary>
@@ -259,6 +305,35 @@ namespace Enemy
             {
                 Gizmos.color = _blackboard.HasLineOfSight ? Color.green : Color.gray;
                 Gizmos.DrawLine(eye, _blackboard.Target.transform.position);
+            }
+
+            // 出生点与巡逻范围
+            Gizmos.color = Color.cyan;
+            DrawHorizontalRing(_aiContext.HomePosition, config.patrolRadius);
+
+            // 巡逻目标点
+            if (CurrentState == EnemyAIState.Patrol)
+            {
+                Gizmos.color = Color.blue;
+                Vector3 patrolTarget = _patrolState.PatrolTarget;
+                Gizmos.DrawWireSphere(patrolTarget + Vector3.up * 0.1f, 0.3f);
+                Gizmos.DrawLine(eye, patrolTarget);
+            }
+        }
+
+        private static void DrawHorizontalRing(Vector3 center, float radius)
+        {
+            if (radius <= 0f) return;
+
+            const int segments = 32;
+            float step = Mathf.PI * 2f / segments;
+            Vector3 previous = center + new Vector3(radius, 0f, 0f);
+            for (int i = 1; i <= segments; i++)
+            {
+                float angle = step * i;
+                Vector3 next = center + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                Gizmos.DrawLine(previous, next);
+                previous = next;
             }
         }
     }

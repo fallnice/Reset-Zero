@@ -50,6 +50,19 @@ namespace Enemy
         [Min(0.01f)] public float stuckMinProgress = 0.1f;
         [Min(0.1f)] public float stuckTimeout = 1.5f;
 
+        [Header("行为（4.1 HFSM）")]
+        [Min(0.5f)] public float idleSeconds = 2f;        // 待机多久后开始巡逻（下限避免待机/巡逻高频切换）
+        [Min(0.5f)] public float patrolRadius = 8f;       // 巡逻取点半径（以出生点为圆心）
+        [Min(0.5f)] public float patrolMinPointDistance = 2f; // 巡逻点与自身的最小距离，避免取到脚下导致瞬间完成
+        [Min(1)] public int patrolPickAttempts = 6;       // 每次取点的随机尝试次数，取不到则回到待机
+        [Min(0.5f)] public float navigationFailureTimeout = 3f; // 导航连续失败/卡住多久后放弃当前巡逻或归位
+        [Min(0.5f)] public float investigateSeconds = 3f; // 到达可疑点后的搜索时长
+        [Min(0f)] public float returnHomeDistance = 25f;  // 离出生点超过该距离就放弃追击/搜索，0 = 不限制
+
+        [Header("调试")]
+        [Tooltip("周期性打印当前 AI 状态与导航状态（每 30 帧一次），排查行为异常时开启")]
+        public bool debugDrawState;
+
         [Header("初始武器")]
         [Tooltip("敌人开局装备的近战武器；为空则敌人无法攻击")]
         public WeaponConfig meleeWeapon;
