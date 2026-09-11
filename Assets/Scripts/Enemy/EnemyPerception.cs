@@ -5,7 +5,8 @@ namespace Enemy
 {
     /// <summary>
     /// 敌人感知——按距离检测目标（玩家 CharacterRoot），锁定后缓存直到超出丢失距离。
-    /// 垂直切片只做距离检测；视线遮挡（LOS）、威胁评估等异构数据留待战术增强阶段扩展。
+    /// 候选目标来自 EnemyRegistry，避免周期性 FindObjectsOfType 的数组分配。
+    /// 垂直切片只做距离检测；视线遮挡（LOS）、最后已知位置、威胁评估留待第四阶段扩展。
     /// </summary>
     public class EnemyPerception
     {
@@ -51,24 +52,15 @@ namespace Enemy
             }
         }
 
-        /// <summary> 在感知范围内查找玩家（IsPlayerControlled 且非自身） </summary>
+        /// <summary> 在感知范围内查找存活玩家（注册表已排除自身、非玩家与死亡角色） </summary>
         private void TryAcquire(CharacterRoot self, float range)
         {
-            CharacterRoot[] roots = Object.FindObjectsOfType<CharacterRoot>();
-            for (int i = 0; i < roots.Length; i++)
-            {
-                CharacterRoot candidate = roots[i];
-                if (candidate == null || candidate == self || !candidate.IsPlayerControlled) continue;
-                if (candidate.Health != null && candidate.Health.IsDead) continue;
+            if (!EnemyRegistry.TryGetNearestPlayer(
+                    self.transform.position, range, self, out CharacterRoot candidate, out float d))
+                return;
 
-                float d = Vector3.Distance(self.transform.position, candidate.transform.position);
-                if (d <= range)
-                {
-                    _target = candidate;
-                    _distanceToTarget = d;
-                    return;
-                }
-            }
+            _target = candidate;
+            _distanceToTarget = d;
         }
     }
 }

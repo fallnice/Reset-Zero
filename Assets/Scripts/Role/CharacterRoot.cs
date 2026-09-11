@@ -168,6 +168,7 @@ namespace Role
 
         private void OnEnable()
         {
+            Enemy.EnemyRegistry.Register(this);
             SubscribeRuntimeEvents();
             if (!_started) return;
 
@@ -361,6 +362,7 @@ namespace Role
 
         private void OnDestroy()
         {
+            Enemy.EnemyRegistry.Unregister(this);
             UnsubscribeRuntimeEvents();
             UnregisterResponders();
         }
