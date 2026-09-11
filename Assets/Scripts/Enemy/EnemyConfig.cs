@@ -14,7 +14,19 @@ namespace Enemy
         [Header("感知")]
         [Min(0f)] public float detectionRange = 15f;    // 首次发现目标的距离
         [Min(0f)] public float loseTargetRange = 20f;   // 丢失目标的距离（迟滞，避免边缘抖动）
-        [Min(0.05f)] public float perceptionSearchInterval = 0.25f; // 无目标时的搜索间隔，避免每帧 FindObjects 分配
+        [Min(0.05f)] public float perceptionSearchInterval = 0.25f; // 无目标时的搜索间隔，避免每帧全场景扫描
+        [Range(1f, 360f)] public float viewAngle = 150f; // 视野角（度）；>= 180 视为全向
+        [Min(0f)] public float eyeHeight = 1.5f;         // 视线起点相对脚底的高度
+
+        [Header("视线（LOS）")]
+        [Tooltip("会遮挡视线的静态几何层；留空则视线检测退化为不被遮挡（仅告警一次）")]
+        public LayerMask losObstacleMask;
+        [Min(0f)] public float losTargetTolerance = 0.25f; // 允许射线略超过目标，避免目标自身挡住视线
+
+        [Header("记忆与怀疑度")]
+        [Min(0f)] public float targetMemorySeconds = 4f;      // 最后已知位置的有效记忆时长
+        [Range(0f, 1f)] public float investigateSuspicionThreshold = 0.5f; // 进入 Investigate 的怀疑度阈值
+        [Min(0f)] public float suspicionDecayPerSecond = 0.25f; // 失去线索后的怀疑度衰减速度
 
         [Header("攻击")]
         [Min(0f)] public float attackRange = 2f;         // 进入攻击状态的距离
@@ -41,5 +53,11 @@ namespace Enemy
         [Header("初始武器")]
         [Tooltip("敌人开局装备的近战武器；为空则敌人无法攻击")]
         public WeaponConfig meleeWeapon;
-    }
+
+        private void OnValidate()
+        {
+            // 丢失距离必须大于发现距离，否则迟滞退化成「刚发现就丢失」，敌人会在 Idle 与 Chase 之间抖动
+            if (loseTargetRange < detectionRange)
+                loseTargetRange = detectionRange;
+        }
 }

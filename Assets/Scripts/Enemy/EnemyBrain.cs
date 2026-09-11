@@ -29,7 +29,11 @@ namespace Enemy
         private CharacterRoot _character;
         private AIInputProvider _aiInput;
         private readonly EnemyPerception _perception = new EnemyPerception();
+        private readonly EnemyAIBlackboard _blackboard = new EnemyAIBlackboard();
         private IEnemyNavigation _navigation;
+
+        /// <summary> 决策黑板（供调试/表现层与后续 Utility 读取） </summary>
+        public EnemyAIBlackboard Blackboard => _blackboard;
 
         private EnemyAIState _state = EnemyAIState.Idle;
         private float _nextAttackTime;
@@ -120,7 +124,7 @@ namespace Enemy
                     SetState(EnemyAIState.Idle);
                     TryEquipInitialWeapon();
                 }
-                _perception.Update(_character, config);
+                _perception.Update(_character, config, _blackboard);
                 DecideState();
             }
 
@@ -133,22 +137,22 @@ namespace Enemy
             switch (_state)
             {
                 case EnemyAIState.Idle:
-                    if (_perception.HasTarget)
+                    if (_blackboard.HasTarget)
                         SetState(EnemyAIState.Chase);
                     break;
 
                 case EnemyAIState.Chase:
-                    if (!_perception.HasTarget)
+                    if (!_blackboard.HasTarget)
                         SetState(EnemyAIState.Idle);
-                    else if (_perception.DistanceToTarget <= config.attackRange
+                    else if (_blackboard.DistanceToTarget <= config.attackRange
                         && _navigation.HasReachedDestination)
                         SetState(EnemyAIState.Attack);
                     break;
 
                 case EnemyAIState.Attack:
-                    if (!_perception.HasTarget)
+                    if (!_blackboard.HasTarget)
                         SetState(EnemyAIState.Idle);
-                    else if (_perception.DistanceToTarget > config.attackRange)
+                    else if (_blackboard.DistanceToTarget > config.attackRange)
                         SetState(EnemyAIState.Chase);
                     break;
             }
@@ -167,7 +171,11 @@ namespace Enemy
 
                 case EnemyAIState.Chase:
                     {
-                        _navigation.SetDestination(_perception.Target.transform.position);
+                        // 看得见就朝当前位置走；看不见则走向最后已知位置（4.2 感知扩展）
+                        Vector3 chaseDestination = _blackboard.HasLineOfSight
+                            ? _blackboard.Target.transform.position
+                            : _blackboard.LastKnownTargetPosition;
+                        _navigation.SetDestination(chaseDestination);
                         if (_character.CanMove)
                         {
                             _navigation.Tick(Time.deltaTime);
@@ -187,7 +195,7 @@ namespace Enemy
                 case EnemyAIState.Attack:
                     {
                         _navigation.Stop();
-                        Vector3 toTarget = _perception.Target.transform.position - _character.transform.position;
+                        Vector3 toTarget = _blackboard.Target.transform.position - _character.transform.position;
                         toTarget.y = 0f;
                         if (toTarget.sqrMagnitude > 0.0001f)
                         {
@@ -217,6 +225,41 @@ namespace Enemy
         {
             if (_state == newState) return;
             _state = newState;
+        }
+
+        /// <summary> 决策调试可视化：视野锥、当前目标、最后已知位置与视线 </summary>
+        private void OnDrawGizmosSelected()
+        {
+            if (config == null || _character == null) return;
+
+            Vector3 origin = transform.position;
+            Vector3 eye = origin + Vector3.up * config.eyeHeight;
+
+            // 视野锥：以角色朝向为中轴，画视野角两侧边界
+            Color coneColor = _blackboard.HasLineOfSight ? Color.red : Color.yellow;
+            Gizmos.color = coneColor;
+            float half = config.viewAngle * 0.5f;
+            Vector3 forward = _character.transform.forward;
+            Vector3 leftBoundary = Quaternion.Euler(0f, -half, 0f) * forward;
+            Vector3 rightBoundary = Quaternion.Euler(0f, half, 0f) * forward;
+            Gizmos.DrawRay(eye, leftBoundary * config.detectionRange);
+            Gizmos.DrawRay(eye, rightBoundary * config.detectionRange);
+            Gizmos.DrawWireSphere(eye, 0.05f);
+
+            // 最后已知位置：黄框；有目标但无视线时说明在靠记忆追击
+            if (_blackboard.HasLastKnownPosition)
+            {
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawWireCube(_blackboard.LastKnownTargetPosition + Vector3.up * 0.1f, Vector3.one * 0.4f);
+                Gizmos.DrawLine(eye, _blackboard.LastKnownTargetPosition);
+            }
+
+            // 当前目标：有视线画绿线，无视线画灰线
+            if (_blackboard.HasTarget)
+            {
+                Gizmos.color = _blackboard.HasLineOfSight ? Color.green : Color.gray;
+                Gizmos.DrawLine(eye, _blackboard.Target.transform.position);
+            }
         }
     }
 }
