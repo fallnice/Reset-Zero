@@ -28,6 +28,7 @@ namespace Role.Controllers
     /// 「枪械未瞄准 ↔ 枪械瞄准」**必须在同一个枪械 controller 内部用 IsAiming 切子状态机**——
     /// 整体替换 runtimeAnimatorController 会重置状态机，按住/松开瞄准键时会把攻击、受击动画打断。
     /// </summary>
+    [DefaultExecutionOrder(50)]
     public class CharacterAnimationController : MonoBehaviour, IUpperBodyAnimationSink
     {
         [Header("动画")]
@@ -51,6 +52,8 @@ namespace Role.Controllers
         private static readonly int HashPutWeapon = Animator.StringToHash("PutWeapon");
         private static readonly int HashTakeWeapon = Animator.StringToHash("TakeWeapon");
         private static readonly int HashEquipSpeed = Animator.StringToHash("EquipSpeed");
+        private static readonly int HashSpeed = Animator.StringToHash("Speed");
+        private static readonly int HashIsGrounded = Animator.StringToHash("IsGrounded");
 
         // 换装剪辑的匹配关键字：两套动画集命名不同（近战 TK_Take / 枪械 TakeGun），只能按关键字找
         private const string TakeClipKeyword = "Take";
@@ -70,16 +73,24 @@ namespace Role.Controllers
         private EquipmentController _equipment;
         private HealthController _health;
         private GameObject _weaponModel;
+        private bool _isSubscribed;
+        private bool _started;
 
-        /// <summary>
-        /// 当前动画集是否带换装参数（PutWeapon / TakeWeapon / EquipSpeed）。
-        /// 换 controller 后重算：对不存在的参数调用 SetTrigger 会往 Console 刷告警。
-        /// </summary>
+        // 当前 Animator Controller 的参数能力；仅在 controller 变化时扫描一次，热路径只读 bool。
+        private bool _hasAttackParameter;
+        private bool _hasDieParameter;
+        private bool _hasHitParameter;
+        private bool _hasMoveParameters;
+        private bool _hasAimParameter;
         private bool _hasEquipParameters;
+        private bool _hasLocomotionParameters;
 
         private void Awake()
         {
-            _character = GetComponent<CharacterRoot>();
+            // 表现组件既可挂角色根节点，也可挂 Animator 子模型；统一向父级解析角色根。
+            _character = GetComponentInParent<CharacterRoot>();
+            if (animator == null)
+                animator = GetComponent<Animator>();
         }
 
         // 依赖在 Start 获取：确保所有 Awake 完成（EquipmentController.Init 由 CharacterRoot.Awake 调用），
@@ -95,25 +106,14 @@ namespace Role.Controllers
             if (weaponAttachPoint == null && _equipment != null)
                 weaponAttachPoint = _equipment.RightHandAttachPoint;
 
+            RefreshAnimatorParameterCapabilities();
+
             // Start 执行顺序不确定：CharacterRoot 可能已下发过姿态，这里补一次保证参数与缓存一致
             WriteAimParameter();
 
-            if (_equipment != null)
-            {
-                _equipment.WeaponEquipped += HandleWeaponEquipped;
-                _equipment.AttackCommitted += HandleAttackCommitted;
-                _equipment.UnequipStarted += HandleUnequipStarted;
-
-                // 同步 Start 之前就已装备的武器（如调试菜单/敌人初始武器/出生自带双刀）
-                ApplyAnimationSet(_equipment.CurrentWeapon);
-                RefreshWeaponModel(_equipment.CurrentWeapon);
-            }
-
-            if (_health != null)
-            {
-                _health.Damaged += HandleDamaged;
-                _health.Died += HandleDied;
-            }
+            _started = true;
+            SubscribeEvents();
+            SynchronizePresentationState();
         }
 
         /// <summary>
@@ -126,31 +126,119 @@ namespace Role.Controllers
             if (animator == null || _equipment == null) return;
 
             WeaponConfig weapon = _equipment.CurrentWeapon;
-            if (weapon == null || weapon.type != WeaponType.Ranged) return;
+            if (weapon == null || weapon.type != WeaponType.Ranged || !_hasMoveParameters) return;
 
             IInputProvider input = _character != null ? _character.inputProvider : null;
             Vector3 worldDir = input != null ? input.MoveDirection : Vector3.zero;
 
             // 世界方向转角色本地空间：x = 左右，z = 前后，对应 2D Blend Tree 的 MoveX / MoveY
-            Vector3 localDir = transform.InverseTransformDirection(worldDir);
+            Vector3 localDir = _character.transform.InverseTransformDirection(worldDir);
             animator.SetFloat(HashMoveX, localDir.x);
             animator.SetFloat(HashMoveY, localDir.z);
         }
 
+        /// <summary> FullBody 状态写入基础移动参数；当前 Controller 不满足契约时安全跳过 </summary>
+        public void SetLocomotion(float speed, bool isGrounded)
+        {
+            if (animator == null || !_hasLocomotionParameters) return;
+            animator.SetFloat(HashSpeed, speed);
+            animator.SetBool(HashIsGrounded, isGrounded);
+        }
+
+        /// <summary> 跳跃/下落只更新落地状态 </summary>
+        public void SetGrounded(bool isGrounded)
+        {
+            if (animator == null || !_hasLocomotionParameters) return;
+            animator.SetBool(HashIsGrounded, isGrounded);
+        }
+
+        private void OnEnable()
+        {
+            // 首次 OnEnable 早于 Start，依赖尚未解析时会安全跳过；Start 会再次调用。
+            SubscribeEvents();
+            if (_started)
+                SynchronizePresentationState();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeEvents();
+            _isLeftHandIkRequested = false;
+        }
+
         private void OnDestroy()
         {
+            UnsubscribeEvents();
+        }
+
+        private void SubscribeEvents()
+        {
+            if (_isSubscribed) return;
+
+            if (_equipment != null)
+            {
+                _equipment.WeaponEquipped += HandleWeaponEquipped;
+                _equipment.AttackCommitted += HandleAttackCommitted;
+                _equipment.UnequipStarted += HandleUnequipStarted;
+            }
+            if (_health != null)
+            {
+                _health.Damaged += HandleDamaged;
+                _health.Died += HandleDied;
+                _health.HealthReset += HandleHealthReset;
+            }
+            _isSubscribed = _equipment != null || _health != null;
+        }
+
+        private void UnsubscribeEvents()
+        {
+            if (!_isSubscribed) return;
+
             if (_equipment != null)
             {
                 _equipment.WeaponEquipped -= HandleWeaponEquipped;
                 _equipment.AttackCommitted -= HandleAttackCommitted;
                 _equipment.UnequipStarted -= HandleUnequipStarted;
             }
-
             if (_health != null)
             {
                 _health.Damaged -= HandleDamaged;
                 _health.Died -= HandleDied;
+                _health.HealthReset -= HandleHealthReset;
             }
+            _isSubscribed = false;
+        }
+
+        /// <summary> 重新启用后从逻辑事实重建表现，补偿禁用期间错过的装备/死亡事件 </summary>
+        private void SynchronizePresentationState()
+        {
+            WeaponConfig weapon = _equipment != null ? _equipment.CurrentWeapon : null;
+            ApplyAnimationSet(weapon);
+            RefreshWeaponModel(weapon);
+            SynchronizeLocomotionState();
+            WriteAimParameter();
+            if (_health != null)
+            {
+                if (_health.IsDead)
+                    HandleDied();
+                else
+                    RestoreAliveAnimatorState();
+            }
+        }
+
+        private void SynchronizeLocomotionState()
+        {
+            if (_character == null || _character.fullBodySM == null) return;
+
+            float speed = 0f;
+            if (_character.fullBodySM.GetCurrentState<Role.States.FullBody.RunState>() != null)
+                speed = 1f;
+            else if (_character.fullBodySM.GetCurrentState<Role.States.FullBody.WalkState>() != null)
+                speed = 0.5f;
+
+            bool grounded = _character.fullBodySM.GetCurrentState<Role.States.FullBody.JumpState>() == null
+                && _character.fullBodySM.GetCurrentState<Role.States.FullBody.FallState>() == null;
+            SetLocomotion(speed, grounded);
         }
 
         // ===== 逻辑事件 → 动画 =====
@@ -223,27 +311,66 @@ namespace Role.Controllers
             return 0f;
         }
 
-        /// <summary> 当前动画集是否带换装参数；仅在换 controller 时调用（animator.parameters 会分配数组） </summary>
-        private bool HasEquipParameters()
+        /// <summary>
+        /// 扫描当前 Controller 的参数契约。animator.parameters 会分配数组，因此只在 Start/换 Controller 时调用；
+        /// 后续 Update 与事件路径只读缓存 bool，既避免 GC，也避免向不存在/类型错误的参数写值。
+        /// </summary>
+        private void RefreshAnimatorParameterCapabilities()
         {
-            if (animator == null) return false;
+            _hasAttackParameter = false;
+            _hasDieParameter = false;
+            _hasHitParameter = false;
+            _hasMoveParameters = false;
+            _hasAimParameter = false;
+            _hasEquipParameters = false;
+            _hasLocomotionParameters = false;
+            if (animator == null) return;
 
             AnimatorControllerParameter[] parameters = animator.parameters;
-            if (parameters == null) return false;
+            if (parameters == null) return;
 
+            bool hasMoveX = false;
+            bool hasMoveY = false;
             bool hasPut = false;
             bool hasTake = false;
+            bool hasEquipSpeed = false;
             bool hasSpeed = false;
+            bool hasGrounded = false;
 
             for (int i = 0; i < parameters.Length; i++)
             {
-                int hash = parameters[i].nameHash;
-                if (hash == HashPutWeapon) hasPut = true;
-                else if (hash == HashTakeWeapon) hasTake = true;
-                else if (hash == HashEquipSpeed) hasSpeed = true;
+                AnimatorControllerParameter parameter = parameters[i];
+                int hash = parameter.nameHash;
+                AnimatorControllerParameterType type = parameter.type;
+
+                if (hash == HashAttack) _hasAttackParameter = type == AnimatorControllerParameterType.Trigger;
+                else if (hash == HashDie) _hasDieParameter = type == AnimatorControllerParameterType.Trigger;
+                else if (hash == HashHit) _hasHitParameter = type == AnimatorControllerParameterType.Trigger;
+                else if (hash == HashMoveX) hasMoveX = type == AnimatorControllerParameterType.Float;
+                else if (hash == HashMoveY) hasMoveY = type == AnimatorControllerParameterType.Float;
+                else if (hash == HashIsAiming) _hasAimParameter = type == AnimatorControllerParameterType.Bool;
+                else if (hash == HashPutWeapon) hasPut = type == AnimatorControllerParameterType.Trigger;
+                else if (hash == HashTakeWeapon) hasTake = type == AnimatorControllerParameterType.Trigger;
+                else if (hash == HashEquipSpeed) hasEquipSpeed = type == AnimatorControllerParameterType.Float;
+                else if (hash == HashSpeed) hasSpeed = type == AnimatorControllerParameterType.Float;
+                else if (hash == HashIsGrounded) hasGrounded = type == AnimatorControllerParameterType.Bool;
             }
 
-            return hasPut && hasTake && hasSpeed;
+            _hasMoveParameters = hasMoveX && hasMoveY;
+            _hasEquipParameters = hasPut && hasTake && hasEquipSpeed;
+            _hasLocomotionParameters = hasSpeed && hasGrounded;
+
+            bool isRanged = _equipment != null
+                && _equipment.CurrentWeapon != null
+                && _equipment.CurrentWeapon.type == WeaponType.Ranged;
+            if (!_hasAttackParameter || !_hasDieParameter || !_hasHitParameter || !_hasLocomotionParameters
+                || (isRanged && (!_hasMoveParameters || !_hasAimParameter)))
+            {
+                Debug.LogWarning(
+                    "[CharacterAnimationController] 当前 Animator Controller 参数契约不完整，" +
+                    "请检查 Attack/Hit/Die/Speed/IsGrounded，以及枪械的 MoveX/MoveY/IsAiming 类型",
+                    this);
+            }
         }
 
         /// <summary>
@@ -255,6 +382,7 @@ namespace Role.Controllers
         {
             if (animator == null) return;
 
+            _isLeftHandIkRequested = false;
             RuntimeAnimatorController target = ResolveController(weapon);
 
             // 未配置对应的动画集时保持现状，兼容只做了一套动画的情况；
@@ -262,8 +390,8 @@ namespace Role.Controllers
             if (target != null && animator.runtimeAnimatorController != target)
                 animator.runtimeAnimatorController = target;
 
-            // 参数构成随 controller 变，重新探测一次换装参数是否存在
-            _hasEquipParameters = HasEquipParameters();
+            // 参数构成随 controller 变，重新探测一次能力，后续热路径只读 bool
+            RefreshAnimatorParameterCapabilities();
 
             // 换 controller 会重置 Animator 参数，故切完重发一次瞄准参数
             WriteAimParameter();
@@ -291,18 +419,48 @@ namespace Role.Controllers
         /// </summary>
         private void HandleAttackCommitted(WeaponConfig weapon)
         {
-            if (weapon == null) return;
-            animator?.SetTrigger(HashAttack);
+            if (weapon == null || animator == null || !_hasAttackParameter) return;
+            animator.SetTrigger(HashAttack);
         }
 
         private void HandleDamaged(float remainingHealth)
         {
-            animator?.SetTrigger(HashHit);
+            // 致命伤紧接着会触发 Died；不再同栈叠加 Hit 与 Die 两个 Trigger。
+            if (remainingHealth <= 0f || animator == null || !_hasHitParameter) return;
+            animator.SetTrigger(HashHit);
         }
 
         private void HandleDied()
         {
-            animator?.SetTrigger(HashDie);
+            _isLeftHandIkRequested = false;
+            if (animator == null || !_hasDieParameter) return;
+
+            if (_hasHitParameter) animator.ResetTrigger(HashHit);
+            if (_hasAttackParameter) animator.ResetTrigger(HashAttack);
+            if (_hasEquipParameters)
+            {
+                animator.ResetTrigger(HashPutWeapon);
+                animator.ResetTrigger(HashTakeWeapon);
+            }
+            animator.SetTrigger(HashDie);
+        }
+
+        private void HandleHealthReset()
+        {
+            RestoreAliveAnimatorState();
+        }
+
+        private void RestoreAliveAnimatorState()
+        {
+            _isLeftHandIkRequested = false;
+            if (animator == null) return;
+
+            // 复活/重新启用是低频显式操作，允许 Rebind 清理死亡状态与残留 Trigger。
+            animator.Rebind();
+            animator.Update(0f);
+            RefreshAnimatorParameterCapabilities();
+            SynchronizeLocomotionState();
+            WriteAimParameter();
         }
 
         // ===== 武器模型 =====
@@ -342,7 +500,8 @@ namespace Role.Controllers
         /// <summary> 写入瞄准参数；切动画集后也要调用——参数会随 controller 切换被重置 </summary>
         private void WriteAimParameter()
         {
-            animator?.SetBool(HashIsAiming, _currentMode == UpperBodyMode.RangedAiming);
+            if (animator == null || !_hasAimParameter) return;
+            animator.SetBool(HashIsAiming, _currentMode == UpperBodyMode.RangedAiming);
         }
 
         /// <summary>
@@ -364,23 +523,8 @@ namespace Role.Controllers
         private bool _isLeftHandIkRequested;
 
         /// <summary>
-        /// CombatGirls 资产包在瞄准 / 换枪 / 待机等剪辑里刻了动画事件 `SwitchSocket`，
-        /// 参数是逗号分隔的命令串（如 `To_Hand_R_Socket, IK_ON_Left_Handle`）。
-        ///
-        /// 方法名与签名由资产决定、不可改：Unity 按「方法名 + 参数类型」在 **Animator 所在 GameObject**
-        /// 上查找接收者，找不到就对每次事件刷 "AnimationEvent 'SwitchSocket' ... has no receiver"。
-        /// 本组件恰好与 Animator 同物体，故在此接住（签名与资产包 Character_Weapon_Controller 一致，
-        /// 顺带能拿到触发它的剪辑名）。资源包里 43 个剪辑带这个事件，不接住会持续污染 Console。
-        /// </summary>
-        public void SwitchSocket(AnimationEvent animEvent)
-        {
-            if (animEvent == null) return;
-            SwitchSocketByString(animEvent.stringParameter);
-        }
-
-        /// <summary>
-        /// 字符串入口：与资产包 Character_Weapon_Controller 的同名方法对齐，
-        /// 便于 StateMachineBehaviour 或脚本直接调用（不经过动画事件）。
+        /// 字符串命令入口。Animator 所在物体的 CharacterAnimatorEventRelay 接收 Animation Event 后转发到这里，
+        /// 因此本组件可安全挂在角色根节点或模型子节点，不再受 Unity 动画事件同物体限制。
         /// </summary>
         public void SwitchSocketByString(string commands)
         {

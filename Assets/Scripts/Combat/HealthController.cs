@@ -26,6 +26,9 @@ namespace Combat
         /// <summary> 死亡回调（血量首次归零触发一次） </summary>
         public event Action Died;
 
+        /// <summary> 生命重置回调（复活/新一轮测试） </summary>
+        public event Action HealthReset;
+
         private void Awake()
         {
             CurrentHealth = maxHealth;
@@ -62,6 +65,7 @@ namespace Combat
         {
             IsDead = false;
             CurrentHealth = maxHealth;
+            HealthReset?.Invoke();
         }
     }
 }

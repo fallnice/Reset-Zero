@@ -18,8 +18,11 @@ namespace Role.Core
         /// <summary> 注册状态响应器（子控制器在 Awake/Start 中调用） </summary>
         public void Register(IStateResponder responder)
         {
-            if (!_responders.Contains(responder))
-                _responders.Add(responder);
+            if (responder == null || _responders.Contains(responder)) return;
+
+            _responders.Add(responder);
+            // 晚注册/重新启用的响应器立即同步当前强状态，避免错过此前发生的死亡/眩晕。
+            responder.OnStateEnter(_current);
         }
 
         /// <summary> 注销状态响应器（OnDestroy 中调用） </summary>
@@ -59,5 +62,6 @@ namespace Role.Core
         public bool CanMove => _current == CharacterState.Normal || _current == CharacterState.Mounted;
         public bool CanOpenBag => _current == CharacterState.Normal;
         public bool CanAttack => _current == CharacterState.Normal || _current == CharacterState.Mounted;
+        public bool CanChangeEquipment => _current == CharacterState.Normal || _current == CharacterState.Mounted;
     }
 }

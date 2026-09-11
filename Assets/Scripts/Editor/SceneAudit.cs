@@ -4,6 +4,8 @@ using Core;
 using Enemy;
 using Enemy.Navigation;
 using Role;
+using Role.Controllers;
+using Role.Core;
 using Role.Input;
 using Role.Interaction;
 using System;
@@ -218,6 +220,7 @@ namespace EditorTools
             RegisterChecker("CraftView 引用完整", CheckCraftViewRefs);
             RegisterChecker("ToastView 存在", CheckToastView);
             RegisterChecker("CameraFollow 引用完整", CheckCameraFollow);
+            RegisterChecker("角色输入与动画桥接", CheckCharacterPresentation);
             RegisterChecker("敌人 AI 组件完整", CheckEnemyAI);
             RegisterChecker("A* 导航网格配置", CheckEnemyNavigationGrid);
         }
@@ -296,6 +299,41 @@ namespace EditorTools
             return new CheckResult(true, "CameraFollow 存在且 target 已赋值");
         }
 
+        /// <summary> 角色必须有唯一输入源；启用表现层时必须能找到 Animator 与角色根 </summary>
+        private static CheckResult CheckCharacterPresentation()
+        {
+            CharacterRoot[] roots = UnityEngine.Object.FindObjectsOfType<CharacterRoot>(true);
+            var issues = new List<string>();
+            for (int i = 0; i < roots.Length; i++)
+            {
+                CharacterRoot root = roots[i];
+                MonoBehaviour[] components = root.GetComponentsInChildren<MonoBehaviour>(true);
+                int inputCount = 0;
+                for (int j = 0; j < components.Length; j++)
+                {
+                    if (components[j] is IInputProvider) inputCount++;
+                }
+
+                var rootSo = new SerializedObject(root);
+                UnityEngine.Object explicitInput = GetRef(rootSo, "inputProviderSource");
+                if (inputCount == 0)
+                    issues.Add($"{root.name}: 缺少 IInputProvider");
+                else if (inputCount > 1 && explicitInput == null)
+                    issues.Add($"{root.name}: 有 {inputCount} 个 IInputProvider，必须显式指定 Input Provider Source");
+                else if (explicitInput != null && !(explicitInput is IInputProvider))
+                    issues.Add($"{root.name}: Input Provider Source 未实现 IInputProvider");
+
+                CharacterAnimationController presentation =
+                    root.GetComponentInChildren<CharacterAnimationController>(true);
+                if (presentation != null && root.GetComponentInChildren<Animator>(true) == null)
+                    issues.Add($"{root.name}: 已挂 CharacterAnimationController 但缺少 Animator");
+            }
+
+            return issues.Count == 0
+                ? new CheckResult(true, $"{roots.Length} 个角色的输入源与动画层级有效")
+                : new CheckResult(false, string.Join("；", issues));
+        }
+
         /// <summary> 敌人 AI：Brain 的角色/输入/配置缺一都会静默失效 </summary>
         private static CheckResult CheckEnemyAI()
         {
@@ -313,7 +351,7 @@ namespace EditorTools
                     issues.Add($"{brain.name}: 缺少 AIInputProvider");
                 if (brain.GetComponent<CharacterController>() == null)
                     issues.Add($"{brain.name}: 缺少 CharacterController");
-                if (brain.GetComponent<Role.Controllers.EquipmentController>() == null)
+                if (brain.GetComponentInChildren<Role.Controllers.EquipmentController>(true) == null)
                     issues.Add($"{brain.name}: 缺少 EquipmentController");
 
                 CharacterRoot root = brain.GetComponent<CharacterRoot>();

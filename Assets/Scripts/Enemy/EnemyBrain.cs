@@ -78,13 +78,19 @@ namespace Enemy
 
         private void Start()
         {
-            // 开局装备初始近战武器，让攻击链路可复用（equipmentCtrl 已在 CharacterRoot.Awake 完成 Init）
-            if (_character == null || config == null) return;
+            TryEquipInitialWeapon();
+        }
+
+        private void TryEquipInitialWeapon()
+        {
+            // 开局/复活装备初始近战武器，让攻击链路复用 EquipmentController；已有武器时不覆盖。
+            if (_character == null || config == null || (_character.Health != null && _character.Health.IsDead)) return;
             if (_character.Equipment == null)
             {
                 Debug.LogWarning("[EnemyBrain] 缺少 EquipmentController，敌人无法攻击", this);
                 return;
             }
+            if (_character.Equipment.CurrentWeapon != null) return;
             if (config.meleeWeapon == null)
             {
                 Debug.LogWarning("[EnemyBrain] EnemyConfig 未配置 Melee Weapon，敌人无法攻击", this);
@@ -106,8 +112,14 @@ namespace Enemy
             {
                 SetState(EnemyAIState.Dead);
             }
-            else if (_state != EnemyAIState.Dead)
+            else
             {
+                // HealthController.ResetHealth 后允许池化敌人从 Dead 恢复决策与初始武器。
+                if (_state == EnemyAIState.Dead)
+                {
+                    SetState(EnemyAIState.Idle);
+                    TryEquipInitialWeapon();
+                }
                 _perception.Update(_character, config);
                 DecideState();
             }

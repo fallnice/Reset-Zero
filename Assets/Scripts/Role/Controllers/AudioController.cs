@@ -15,11 +15,8 @@ namespace Role.Controllers
 
         public void OnStateExit(CharacterState state) { }
 
-        /// <summary>
-        /// 动画事件回调——走路/跑步脚步声
-        /// 动画clip自带的 AnimationEvent "PlayFootSound" 会自动调用此方法
-        /// </summary>
-        public void PlayFootSound()
+        /// <summary> 由 Animator 同物体的 CharacterAnimatorEventRelay 转发脚步事件 </summary>
+        public void PlayFootstep()
         {
             // TODO: 播放脚步音效（AudioSource.PlayOneShot(...)）
         }

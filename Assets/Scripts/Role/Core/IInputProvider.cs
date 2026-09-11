@@ -4,6 +4,9 @@ namespace Role.Core
     /// 输入抽象接口——玩家和 AI 共用同一套输入契约
     /// Character 只依赖此接口，不关心输入来源
     /// </summary>
+    /// <summary> AI 输入源标记；用于角色身份容错，不增加额外输入成员 </summary>
+    public interface IAIInputProvider : IInputProvider { }
+
     public interface IInputProvider
     {
         /// <summary> 世界空间移动方向（已归一化） </summary>

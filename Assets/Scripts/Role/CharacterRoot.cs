@@ -15,7 +15,8 @@ namespace Role
     public class CharacterRoot : MonoBehaviour, IFactionMember, IAimStateProvider
     {
         // ===== 输入 =====
-        // IInputProvider 是接口，Inspector 无法序列化，Awake 中自动获取
+        [Tooltip("可选：显式指定实现 IInputProvider 的组件；未指定时自动查找且要求角色下只有一个实现")]
+        [SerializeField] private MonoBehaviour inputProviderSource;
         public IInputProvider inputProvider { get; private set; }
 
         /// <summary> 角色 Animator（自动获取子级） </summary>
@@ -29,8 +30,8 @@ namespace Role
         [Header("控制身份")]
         [Tooltip("玩家角色响应 UI 模态（打开背包/制作时站住）；AI/敌人应关闭此开关")]
         [SerializeField] private bool isPlayerControlled = true;
-        /// <summary> 是否为玩家控制角色（AI/敌人为 false） </summary>
-        public bool IsPlayerControlled => isPlayerControlled;
+        /// <summary> 是否为玩家控制角色；AI 输入源会覆盖旧 Prefab 遗留的 true 默认值 </summary>
+        public bool IsPlayerControlled => isPlayerControlled && !(inputProvider is IAIInputProvider);
 
         [Header("阵营")]
         [SerializeField] private Faction faction = Faction.Player;
@@ -47,10 +48,15 @@ namespace Role
         public StateMachine.FullBodyStateMachine fullBodySM;
         public StateMachine.UpperBodyStateMachine upperBodySM;
         private StateMachine.IUpperBodyAnimationSink _upperBodyAnimationSink;
+        private Controllers.CharacterAnimationController _animationController;
 
         // UI 模态（背包/制作等面板打开）时阻断战斗输入
         private bool _uiModalOpen;
+        private bool _movementWasAllowed;
         private EventBus.SubscriptionToken _uiModalToken;
+        private bool _runtimeEventsSubscribed;
+        private bool _started;
+        private bool _initialWeaponsApplied;
 
         // 开火后自动进入瞄准状态的剩余时长：由 HandleAttackCommitted 重置，UpdateAimState 每帧递减
         private float _autoAimRemain;
@@ -73,16 +79,17 @@ namespace Role
 
         private void Awake()
         {
-            // 获取输入提供者（PlayerInputProvider 实现了 IInputProvider）
-            inputProvider = GetComponentInChildren<IInputProvider>();
+            ResolveInputProvider();
 
-            // 获取 Animator 与可选的上半身动画适配器（子级模型上）
-            Animator = GetComponentInChildren<Animator>();
-            _upperBodyAnimationSink = GetComponentInChildren<StateMachine.IUpperBodyAnimationSink>();
+            // 获取 Animator 与可选的上半身动画适配器（含初始 inactive 的子模型）
+            Animator = GetComponentInChildren<Animator>(true);
+            _upperBodyAnimationSink = GetComponentInChildren<StateMachine.IUpperBodyAnimationSink>(true);
+            _animationController = GetComponentInChildren<Controllers.CharacterAnimationController>(true);
+            EnsureAnimatorEventRelay();
 
             // 获取或自动添加协调器
             if (coordinator == null)
-                coordinator = GetComponentInChildren<CharacterStateCoordinator>();
+                coordinator = GetComponentInChildren<CharacterStateCoordinator>(true);
             if (coordinator == null)
                 coordinator = gameObject.AddComponent<CharacterStateCoordinator>();
 
@@ -95,36 +102,21 @@ namespace Role
 
             // 获取子控制器（全部可选，缺失只 log 不报错）
             if (equipmentCtrl == null)
-                equipmentCtrl = GetComponentInChildren<Controllers.EquipmentController>();
+                equipmentCtrl = GetComponentInChildren<Controllers.EquipmentController>(true);
             if (ikCtrl == null)
-                ikCtrl = GetComponentInChildren<Controllers.IKController>();
+                ikCtrl = GetComponentInChildren<Controllers.IKController>(true);
             if (expressionCtrl == null)
-                expressionCtrl = GetComponentInChildren<Controllers.ExpressionController>();
+                expressionCtrl = GetComponentInChildren<Controllers.ExpressionController>(true);
             if (audioCtrl == null)
-                audioCtrl = GetComponentInChildren<Controllers.AudioController>();
+                audioCtrl = GetComponentInChildren<Controllers.AudioController>(true);
 
-            // 获取生命组件并订阅死亡（可选，未挂 HealthController 时角色不可受伤）
+            // 获取生命组件（可选，未挂 HealthController 时角色不可受伤）
             if (health == null)
-                health = GetComponentInChildren<HealthController>();
-            if (health != null)
-                health.Died += HandleHealthDied;
+                health = GetComponentInChildren<HealthController>(true);
 
             // 由根节点显式注入依赖，避免子控制器 Awake 顺序不确定
             if (equipmentCtrl != null)
-            {
                 equipmentCtrl.Init(this, coordinator);
-                equipmentCtrl.WeaponEquipped += HandleWeaponEquipped;
-                equipmentCtrl.AttackCommitted += HandleAttackCommitted;
-            }
-
-            // 只有玩家角色订阅 UI 模态；AI/敌人不因玩家打开面板而停止
-            if (isPlayerControlled)
-            {
-                _uiModalToken = EventBus.Subscribe(EventName.UI_ModalChanged, args =>
-                {
-                    _uiModalOpen = args != null && args.Length > 0 && args[0] is bool b && b;
-                });
-            }
 
             // 检查 CharacterController
             if (GetComponent<CharacterController>() == null)
@@ -135,16 +127,67 @@ namespace Role
                 Debug.LogError("[CharacterRoot] 未分配 CharacterConfig，请在 Inspector 拖入", this);
         }
 
+        /// <summary> 解析唯一输入源；显式引用优先，自动查找时检测多实现歧义 </summary>
+        private void ResolveInputProvider()
+        {
+            if (inputProviderSource != null)
+            {
+                inputProvider = inputProviderSource as IInputProvider;
+                if (inputProvider == null)
+                    Debug.LogError("[CharacterRoot] Input Provider Source 未实现 IInputProvider", this);
+                return;
+            }
+
+            MonoBehaviour[] components = GetComponentsInChildren<MonoBehaviour>(true);
+            int matchCount = 0;
+            for (int i = 0; i < components.Length; i++)
+            {
+                if (!(components[i] is IInputProvider candidate)) continue;
+                if (inputProvider == null) inputProvider = candidate;
+                matchCount++;
+            }
+
+            if (matchCount > 1)
+                Debug.LogError("[CharacterRoot] 检测到多个 IInputProvider，请显式指定 Input Provider Source", this);
+        }
+
+        /// <summary>
+        /// Animation Event 只会发给 Animator 所在 GameObject；运行时补桥接器，
+        /// 保证 CharacterRoot 与 Animator 分层时仍能接收插槽、脚步与 Root Motion 回调。
+        /// </summary>
+        private void EnsureAnimatorEventRelay()
+        {
+            if (Animator == null) return;
+
+            Controllers.CharacterAnimatorEventRelay relay =
+                Animator.GetComponent<Controllers.CharacterAnimatorEventRelay>();
+            if (relay == null)
+                relay = Animator.gameObject.AddComponent<Controllers.CharacterAnimatorEventRelay>();
+            relay.Initialize(this);
+        }
+
+        private void OnEnable()
+        {
+            SubscribeRuntimeEvents();
+            if (!_started) return;
+
+            RegisterResponders();
+            if (health != null && health.IsDead)
+                Die();
+            else if (health != null && coordinator != null && coordinator.IsDead)
+                RestoreAfterHealthReset();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeRuntimeEvents();
+            UnregisterResponders();
+        }
+
         private void Start()
         {
-            // 注册子控制器到协调器
-            if (coordinator != null)
-            {
-                if (equipmentCtrl != null) coordinator.Register(equipmentCtrl);
-                if (ikCtrl != null) coordinator.Register(ikCtrl);
-                if (expressionCtrl != null) coordinator.Register(expressionCtrl);
-                if (audioCtrl != null) coordinator.Register(audioCtrl);
-            }
+            _started = true;
+            RegisterResponders();
 
             // 初始化状态机（注入 character + coordinator；动画 Sink 可为空）
             fullBodySM.Init(this, coordinator);
@@ -153,6 +196,13 @@ namespace Role
             // 设置初始状态，并同步可能在 Start 前已装备的武器
             fullBodySM.ToIdle();
             upperBodySM.SetMode(GetUpperBodyMode(equipmentCtrl?.CurrentWeapon));
+            _movementWasAllowed = CanMove && !_uiModalOpen;
+
+            // 补偿 OnEnable/Start 之前可能发生或禁用期间错过的生命事件。
+            if (health != null && health.IsDead)
+                Die();
+            else if (health != null && coordinator != null && coordinator.IsDead)
+                RestoreAfterHealthReset();
 
             EquipInitialWeapons();
         }
@@ -163,7 +213,21 @@ namespace Role
         /// </summary>
         private void EquipInitialWeapons()
         {
-            if (equipmentCtrl == null || config == null || config.initialWeapons == null) return;
+            if (_initialWeaponsApplied) return;
+
+            // CharacterConfig.initialWeapons 是玩家出生装备；AI/敌人由 EnemyConfig 独立配置，避免复用 Player.asset 时串装备。
+            if (!IsPlayerControlled)
+            {
+                _initialWeaponsApplied = true;
+                return;
+            }
+            if (equipmentCtrl == null || config == null || config.initialWeapons == null)
+            {
+                _initialWeaponsApplied = true;
+                return;
+            }
+            // Start 前死亡时暂不消费初始化机会，Respawn 后再补装。
+            if (coordinator != null && !coordinator.CanChangeEquipment) return;
 
             WeaponConfig[] weapons = config.initialWeapons;
             for (int i = 0; i < weapons.Length; i++)
@@ -171,6 +235,7 @@ namespace Role
                 if (weapons[i] != null)
                     equipmentCtrl.Pickup(weapons[i]);
             }
+            _initialWeaponsApplied = true;
         }
 
         private void Update()
@@ -190,6 +255,12 @@ namespace Role
                 UpdateFacing();
                 fullBodySM.OnUpdate();
             }
+            else if (_movementWasAllowed)
+            {
+                // 首次进入禁移状态时复位 locomotion，避免 UI/眩晕/死亡后原地播放 Walk/Run。
+                fullBodySM.ToIdle();
+            }
+            _movementWasAllowed = canMove;
 
             // 抑制只关闭叠加表现，请求姿态保留，恢复后自动同步
             upperBodySM.OnUpdate();
@@ -200,8 +271,8 @@ namespace Role
         {
             if (inputProvider == null || equipmentCtrl == null) return;
 
-            // UI 模态打开时阻断战斗输入（攻击/切枪/丢弃）
-            if (_uiModalOpen) return;
+            // UI 模态或死亡/眩晕/过场等强状态下阻断攻击、切枪与丢弃
+            if (_uiModalOpen || (coordinator != null && !coordinator.CanChangeEquipment)) return;
 
             if (inputProvider.SelectPrimaryPressedThisFrame)
                 equipmentCtrl.SwitchTo(WeaponSlot.Primary);
@@ -245,7 +316,7 @@ namespace Role
             WeaponConfig weapon = equipmentCtrl != null ? equipmentCtrl.CurrentWeapon : null;
             bool rangedEquipped = weapon != null && weapon.type == WeaponType.Ranged;
             bool aimHeld = inputProvider != null && inputProvider.AimHeld;
-            bool canAct = coordinator == null || coordinator.CanAttack;
+            bool canAct = (coordinator == null || coordinator.CanAttack) && !_uiModalOpen;
 
             IsAiming = canAct && rangedEquipped && (aimHeld || _autoAimRemain > 0f);
 
@@ -261,6 +332,11 @@ namespace Role
         private void HandleHealthDied()
         {
             Die();
+        }
+
+        private void HandleHealthReset()
+        {
+            RestoreAfterHealthReset();
         }
 
         /// <summary>
@@ -283,30 +359,111 @@ namespace Role
             ikCtrl?.OnLateUpdate();
         }
 
-        /// <summary>
-        /// 接管 Animator 的 Root Motion 控制权——空实现 = 动画自带位移被丢弃，所有位移由代码驱动
-        /// 这样即使 Animator 的 Apply Root Motion 勾着，动画也不会抢 CharacterController 的位移
-        /// </summary>
-        private void OnAnimatorMove() { }
-
         private void OnDestroy()
         {
+            UnsubscribeRuntimeEvents();
+            UnregisterResponders();
+        }
+
+        private void SubscribeRuntimeEvents()
+        {
+            if (_runtimeEventsSubscribed) return;
+
             if (equipmentCtrl != null)
             {
-                equipmentCtrl.WeaponEquipped -= HandleWeaponEquipped;
-                equipmentCtrl.AttackCommitted -= HandleAttackCommitted;
+                equipmentCtrl.WeaponEquipped += HandleWeaponEquipped;
+                equipmentCtrl.AttackCommitted += HandleAttackCommitted;
+            }
+            if (health != null)
+            {
+                health.Died += HandleHealthDied;
+                health.HealthReset += HandleHealthReset;
+            }
+
+            // 只有玩家角色订阅 UI 模态；AI/敌人不因玩家打开面板而停止。
+            if (IsPlayerControlled && _uiModalToken == null)
+            {
+                _uiModalToken = EventBus.Subscribe(EventName.UI_ModalChanged, args =>
+                {
+                    _uiModalOpen = args != null && args.Length > 0 && args[0] is bool b && b;
+                });
+            }
+
+            _runtimeEventsSubscribed = true;
+        }
+
+        private void UnsubscribeRuntimeEvents()
+        {
+            if (_runtimeEventsSubscribed)
+            {
+                if (equipmentCtrl != null)
+                {
+                    equipmentCtrl.WeaponEquipped -= HandleWeaponEquipped;
+                    equipmentCtrl.AttackCommitted -= HandleAttackCommitted;
+                }
+                if (health != null)
+                {
+                    health.Died -= HandleHealthDied;
+                    health.HealthReset -= HandleHealthReset;
+                }
+                _runtimeEventsSubscribed = false;
             }
 
             _uiModalToken?.Dispose();
+            _uiModalToken = null;
+            _uiModalOpen = false;
+        }
 
-            if (health != null)
-                health.Died -= HandleHealthDied;
+        private void RegisterResponders()
+        {
+            if (coordinator == null) return;
+            if (equipmentCtrl != null) coordinator.Register(equipmentCtrl);
+            if (ikCtrl != null) coordinator.Register(ikCtrl);
+            if (expressionCtrl != null) coordinator.Register(expressionCtrl);
+            if (audioCtrl != null) coordinator.Register(audioCtrl);
+        }
+
+        private void UnregisterResponders()
+        {
+            if (coordinator == null) return;
+            if (equipmentCtrl != null) coordinator.Unregister(equipmentCtrl);
+            if (ikCtrl != null) coordinator.Unregister(ikCtrl);
+            if (expressionCtrl != null) coordinator.Unregister(expressionCtrl);
+            if (audioCtrl != null) coordinator.Unregister(audioCtrl);
         }
 
         // ===== 公共接口 =====
 
         /// <summary> 装备控制器（子控制器，未拖拽且未自动找到时为 null） </summary>
         public Controllers.EquipmentController Equipment => equipmentCtrl;
+
+        /// <summary> FullBody 状态写入基础移动动画；有表现适配器时按参数契约安全写入 </summary>
+        public void SetLocomotionAnimation(float speed, bool isGrounded)
+        {
+            if (_animationController != null)
+            {
+                _animationController.SetLocomotion(speed, isGrounded);
+                return;
+            }
+
+            // 兼容尚未挂表现适配器的旧角色 Controller（旧契约固定包含 Speed/IsGrounded）。
+            if (Animator != null)
+            {
+                Animator.SetFloat("Speed", speed);
+                Animator.SetBool("IsGrounded", isGrounded);
+            }
+        }
+
+        /// <summary> 跳跃/下落状态更新落地参数 </summary>
+        public void SetGroundedAnimation(bool isGrounded)
+        {
+            if (_animationController != null)
+            {
+                _animationController.SetGrounded(isGrounded);
+                return;
+            }
+            Animator?.SetBool("IsGrounded", isGrounded);
+        }
 
         /// <summary>
         /// 当前是否处于瞄准状态（IAimStateProvider）：持远程武器，且（按住瞄准键 或 开火后的自动保持期内）。
@@ -381,16 +538,35 @@ namespace Role
                 RotateToward(look, config.aimRotationSpeed);
         }
 
-        /// <summary> 角色死亡——只改状态，各控制器自行响应 </summary>
+        /// <summary> 角色死亡——切换强状态并归零移动表现；Start 前收到死亡事件也不会驱动未初始化状态机 </summary>
         public void Die()
         {
+            if (_started)
+                fullBodySM?.ToIdle();
+            _movementWasAllowed = false;
             coordinator?.ChangeState(CharacterState.Dead);
         }
 
-        /// <summary> 角色复活 </summary>
+        /// <summary> 角色复活；有 HealthController 时由 HealthReset 事件统一完成状态恢复 </summary>
         public void Respawn()
         {
+            if (health != null)
+                health.ResetHealth();
+            else
+                RestoreAfterHealthReset();
+        }
+
+        private void RestoreAfterHealthReset()
+        {
+            _autoAimRemain = 0f;
+            IsAiming = false;
             coordinator?.ChangeState(CharacterState.Normal);
+            if (!_started) return;
+
+            fullBodySM?.ToIdle();
+            _movementWasAllowed = true;
+            upperBodySM?.SetMode(GetUpperBodyMode(equipmentCtrl?.CurrentWeapon));
+            EquipInitialWeapons();
         }
     }
 }

@@ -16,8 +16,7 @@ namespace Role.States.FullBody
             _cc = character.GetComponent<CharacterController>();
             _verticalVelocity = character.Config.jumpForce;
 
-            if (Animator != null)
-                Animator.SetBool("IsGrounded", false);
+            character.SetGroundedAnimation(false);
         }
 
         public override void OnUpdate()

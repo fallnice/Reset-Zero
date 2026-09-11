@@ -9,7 +9,7 @@ namespace Enemy
     /// 攻击边缘标志不在此处自动清除，而由 EnemyBrain 每帧决策前重置、决策后设置，
     /// 避免 LateUpdate 清除与 CharacterRoot.Update 读取之间的时序竞态。
     /// </summary>
-    public class AIInputProvider : MonoBehaviour, IInputProvider
+    public class AIInputProvider : MonoBehaviour, IAIInputProvider
     {
         private Vector3 _moveDirection;
         private Vector3 _lookDirection = Vector3.forward;

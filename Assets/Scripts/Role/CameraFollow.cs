@@ -54,10 +54,14 @@ namespace Role
         {
             if (target == null) return;
 
-            // 延迟获取输入提供者（首次非 null 后缓存）
+            // 复用 CharacterRoot 已解析的唯一输入源，避免多 IInputProvider 时相机与角色各选一个。
             if (_inputProvider == null)
             {
-                _inputProvider = target.GetComponentInChildren<Role.Core.IInputProvider>();
+                CharacterRoot root = target.GetComponentInParent<CharacterRoot>();
+                if (root == null) root = target.GetComponentInChildren<CharacterRoot>(true);
+                _inputProvider = root != null
+                    ? root.inputProvider
+                    : target.GetComponentInChildren<Role.Core.IInputProvider>(true);
                 if (_inputProvider == null)
                 {
                     if (!_inputMissingWarned)
@@ -69,9 +73,15 @@ namespace Role
                 }
             }
 
-            // 延迟获取瞄准状态（首次非 null 后缓存；角色未实现该接口时一律视为未瞄准）
+            // 延迟获取瞄准状态；target 允许是角色根或其跟随锚点/骨骼子节点。
             if (_aimStateProvider == null)
-                _aimStateProvider = target.GetComponentInChildren<Role.Core.IAimStateProvider>();
+            {
+                CharacterRoot root = target.GetComponentInParent<CharacterRoot>();
+                if (root == null) root = target.GetComponentInChildren<CharacterRoot>(true);
+                _aimStateProvider = root != null
+                    ? root
+                    : target.GetComponentInChildren<Role.Core.IAimStateProvider>(true);
+            }
 
             // 鼠标/右摇杆输入控制旋转（统一走 Input System 的 Look action）
             UnityEngine.Vector2 lookDelta = _inputProvider.LookDelta;
@@ -98,6 +108,12 @@ namespace Role
         public void SetTarget(Transform newTarget)
         {
             target = newTarget;
+            _inputProvider = null;
+            _aimStateProvider = null;
+            _inputMissingWarned = false;
+            _distanceVelocity = 0f;
+            if (target != null)
+                _yaw = target.eulerAngles.y;
         }
 
         /// <summary> 外部获取当前相机水平朝向（角色移动方向用） </summary>

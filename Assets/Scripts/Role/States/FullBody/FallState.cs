@@ -16,8 +16,7 @@ namespace Role.States.FullBody
             _cc = character.GetComponent<CharacterController>();
             _verticalVelocity = character.Context.Runtime.airVerticalVelocity;
 
-            if (Animator != null)
-                Animator.SetBool("IsGrounded", false);
+            character.SetGroundedAnimation(false);
         }
 
         public override void OnUpdate()
@@ -42,8 +41,7 @@ namespace Role.States.FullBody
             // 触地 → 根据输入回到对应状态
             if (_cc.isGrounded && _verticalVelocity < 0f)
             {
-                if (Animator != null)
-                    Animator.SetBool("IsGrounded", true);
+                character.SetGroundedAnimation(true);
 
                 if (character.inputProvider != null && character.inputProvider.MoveDirection.sqrMagnitude > 0.01f)
                 {

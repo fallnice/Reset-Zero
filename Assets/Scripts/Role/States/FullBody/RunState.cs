@@ -16,11 +16,7 @@ namespace Role.States.FullBody
             _cc = character.GetComponent<CharacterController>();
             character.Context.Runtime.moveSpeed = character.Config.runSpeed;
 
-            if (Animator != null)
-            {
-                Animator.SetFloat("Speed", 1f);
-                Animator.SetBool("IsGrounded", true);
-            }
+            character.SetLocomotionAnimation(1f, true);
         }
 
         public override void OnUpdate()

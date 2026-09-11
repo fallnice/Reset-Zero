@@ -100,6 +100,10 @@ namespace Role.Controllers
             && _currentWeapon != null
             && _currentBehavior != null
             && AttackCooldownRemaining <= 0f;
+        private bool CanChangeEquipmentNow()
+        {
+            return _coordinator == null || _coordinator.CanChangeEquipment;
+        }
 
         /// <summary> 由 CharacterRoot 在协调器创建完成后注入运行依赖 </summary>
         public void Init(CharacterRoot character, CharacterStateCoordinator coordinator)
@@ -134,6 +138,7 @@ namespace Role.Controllers
         /// <summary> 拾取武器：落入归属槽位（同槽覆盖），并自动切换装备。Editor 调试菜单直接覆盖用 </summary>
         public bool Pickup(WeaponConfig weapon)
         {
+            if (!CanChangeEquipmentNow()) return false;
             if (weapon == null || !TryGetSlotIndex(weapon.slot, out int index)) return false;
 
             // 只有真正换成另一把武器时才重置该槽冷却，重复拾取同一配置不能绕过冷却
@@ -164,6 +169,11 @@ namespace Role.Controllers
         public bool TryPickup(WeaponConfig weapon, out string failReason)
         {
             failReason = null;
+            if (!CanChangeEquipmentNow())
+            {
+                failReason = "当前状态不能拾取武器";
+                return false;
+            }
             if (weapon == null)
             {
                 failReason = "武器配置为空";
@@ -190,6 +200,7 @@ namespace Role.Controllers
         /// </summary>
         public bool Drop()
         {
+            if (!CanChangeEquipmentNow()) return false;
             if (_currentWeapon == null)
             {
                 EventBus.Emit(EventName.UI_Toast, "当前没有可丢弃的武器");
@@ -274,6 +285,7 @@ namespace Role.Controllers
         /// <summary> 切换到指定槽位（空槽或当前武器忽略） </summary>
         public void SwitchTo(WeaponSlot slot)
         {
+            if (!CanChangeEquipmentNow()) return;
             if (!TryGetSlotIndex(slot, out int index)) return;
 
             WeaponConfig target = _slots[index];
@@ -436,7 +448,10 @@ namespace Role.Controllers
         // ===== IStateResponder =====
         public void OnStateEnter(CharacterState state)
         {
-            // TODO(表现层): 特殊状态收起武器（如 Dead 时掉枪/收刀）
+            // 死亡/眩晕/过场等禁用装备操作的强状态会立即中断尚未落位的 Put/Take。
+            // Put 阶段保留旧武器，Take 阶段保留已落位的新武器，均不再延迟切 Controller。
+            if (!CanChangeEquipmentNow())
+                CancelSwitch();
         }
 
         public void OnStateExit(CharacterState state) { }
