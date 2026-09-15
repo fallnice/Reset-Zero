@@ -26,6 +26,7 @@ namespace Enemy
     [DefaultExecutionOrder(-50)]
     [RequireComponent(typeof(CharacterRoot))]
     [RequireComponent(typeof(AIInputProvider))]
+    [RequireComponent(typeof(EnemyHearing))]
     public class EnemyBrain : MonoBehaviour
     {
         [SerializeField] private EnemyConfig config;
@@ -42,7 +43,10 @@ namespace Enemy
         public EnemyAIBlackboard Blackboard => _blackboard;
 
         private readonly EnemyAIContext _aiContext = new EnemyAIContext();
+        private EnemyHearing _hearing;
         private IEnemyState _currentState;
+        private bool _runtimeEventsSubscribed;
+        private bool _wasDead;
 
         private readonly IdleState _idleState = new IdleState();
         private readonly PatrolState _patrolState = new PatrolState();
@@ -64,8 +68,18 @@ namespace Enemy
         {
             _character = GetComponent<CharacterRoot>();
             _aiInput = GetComponent<AIInputProvider>();
+            // 注册到角色上，EnemyRegistry 才能把武器声广播给本敌人
+            if (_character != null)
+                _character.SetBrain(this);
             ResolveNavigation();
             _navigation?.Initialize(transform, GetComponent<CharacterController>(), config);
+
+            // 听觉：受击自己订阅，武器声由下面的 AttackCommitted 转发给它
+            _hearing = GetComponent<EnemyHearing>();
+            _hearing?.Initialize(_blackboard, _character != null ? _character.Health : null, config);
+
+            // Utility 评分器：无配置时保持 Engage，不影响原有追击行为
+            _aiContext.Tactical = config != null ? new EnemyUtilityEvaluator(config) : null;
 
             // 出生点用于 Patrol 取点与 ReturnHome 判定
             _aiContext.HomePosition = transform.position;
@@ -98,8 +112,31 @@ namespace Enemy
                 _navigation = new DirectNavigation(config);
         }
 
+        private void OnEnable()
+        {
+            SubscribeRuntimeEvents();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeRuntimeEvents();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeRuntimeEvents();
+        }
+
         private void Start()
         {
+            // EnemyBrain 执行顺序(-50)早于 CharacterRoot，Awake 时 HealthController 可能还没解析出来。
+            // Start 时所有 Awake 已完成，这里补订一次，避免听觉与生命事件静默失效。
+            if (_character != null)
+            {
+                _hearing?.Initialize(_blackboard, _character.Health, config);
+                _hearing?.TrySubscribe();
+            }
+            SubscribeRuntimeEvents();
             TryEquipInitialWeapon();
         }
 
@@ -124,7 +161,13 @@ namespace Enemy
 
         private void Update()
         {
-            if (_character == null || _aiInput == null || config == null) return;
+            if (config == null)
+            {
+                Debug.LogWarning("[EnemyBrain] 未分配 EnemyConfig，敌人 AI 已停止", this);
+                enabled = false;
+                return;
+            }
+            if (_character == null || _aiInput == null) return;
 
             // 重置本帧攻击意图：由决策循环统一管理边缘触发，避免 LateUpdate 清除的时序竞态
             _aiInput.SetAttackPressed(false);
@@ -137,15 +180,20 @@ namespace Enemy
             _aiContext.Blackboard = _blackboard;
             _aiContext.Config = config;
             _aiContext.DeltaTime = Time.deltaTime;
+            _aiContext.TickCooldowns(Time.deltaTime);
+            _blackboard.TickTacticalCommit(Time.deltaTime);
             if (_aiContext.Grid == null)
             {
                 // 与项目其它模块保持一致仍用 FindObjectOfType；无网格时 Grid 恒为 null，Patrol 会自动退回 Idle。
                 _aiContext.Grid = Object.FindObjectOfType<EnemyNavigationGrid>();
             }
 
+            bool isDead = _character.Health != null && _character.Health.IsDead;
+
             // 强状态优先：死亡 > 眩晕 > 常规决策
-            if (_character.Health != null && _character.Health.IsDead)
+            if (isDead)
             {
+                _wasDead = true;
                 TransitionTo(EnemyAIState.Dead);
             }
             else if (IsStunned())
@@ -154,18 +202,17 @@ namespace Enemy
             }
             else
             {
-                // HealthController.ResetHealth 后允许池化敌人从 Dead 恢复决策、初始武器与感知事实。
-                if (_currentState != null && _currentState.Kind == EnemyAIState.Dead)
-                {
-                    // 池化复用可能换个出生点，重设归位基准，避免以旧出生点判定「离家过远」
-                    _aiContext.HomePosition = transform.position;
-                    _aiContext.ResetTimers();
-                    _blackboard.Reset();
-                    _perception.Reset();
-                    TryEquipInitialWeapon();
-                }
+                // 上一轮死亡、现在已复活（HealthController.ResetHealth）：一次性恢复决策与装备
+                if (_wasDead)
+                    RecoverFromDeath();
 
                 _perception.Update(_character, config, _blackboard);
+
+                // 战术计时：撤退与包抄的超时兜底依赖它，必须在状态执行前刷新
+                _aiContext.TacticalElapsed = _blackboard.GetTacticalElapsed(config.tacticalCommitSeconds);
+                _aiContext.RetreatElapsed = _blackboard.TacticalChoice == EnemyTacticalChoice.Retreat
+                    ? _aiContext.RetreatElapsed + Time.deltaTime
+                    : 0f;
                 TransitionTo(GetDesiredState());
             }
 
@@ -174,9 +221,6 @@ namespace Enemy
 
             if (_aiContext.HasPendingTransition)
                 TransitionTo(_aiContext.PendingTransition);
-
-            if (config.debugDrawState && Time.frameCount % 30 == 0)
-                Debug.Log($"[EnemyBrain] {name} 状态={CurrentState} 导航={NavigationStatus}", this);
         }
 
         private bool IsStunned()
@@ -257,6 +301,85 @@ namespace Enemy
             }
         }
 
+        private void SubscribeRuntimeEvents()
+        {
+            if (_runtimeEventsSubscribed) return;
+
+            // 依赖未就绪时不置位，留给 Start 或后续帧重试；CharacterRoot.Awake 晚于本组件的 Awake/OnEnable。
+            if (_character == null) return;
+
+            Controllers.EquipmentController equipment = _character.Equipment;
+            Combat.HealthController health = _character.Health;
+            if (equipment == null || health == null) return;
+
+            equipment.AttackCommitted += HandleAnyAttackCommitted;
+            health.Died += HandleHealthDied;
+            health.HealthReset += HandleHealthReset;
+
+            _runtimeEventsSubscribed = true;
+        }
+
+        private void UnsubscribeRuntimeEvents()
+        {
+            if (!_runtimeEventsSubscribed) return;
+
+            Controllers.EquipmentController equipment = _character != null ? _character.Equipment : null;
+            if (equipment != null)
+                equipment.AttackCommitted -= HandleAnyAttackCommitted;
+
+            Combat.HealthController health = _character != null ? _character.Health : null;
+            if (health != null)
+            {
+                health.Died -= HandleHealthDied;
+                health.HealthReset -= HandleHealthReset;
+            }
+
+            _runtimeEventsSubscribed = false;
+        }
+
+        private void HandleHealthDied()
+        {
+            _wasDead = true;
+        }
+
+        /// <summary> 生命重置：重新绑定听觉依赖，并标记可以回到常规决策 </summary>
+        private void HandleHealthReset()
+        {
+            if (_hearing != null && _character != null)
+                _hearing.Initialize(_blackboard, _character.Health, config);
+        }
+
+        /// <summary>
+        /// 本角色提交攻击：把攻击者位置作为声源广播给所有敌人。
+        /// 每个敌人的 EnemyHearing 会自己按距离过滤，并忽略自己的声音。
+        /// 全局 EventBus 不带位置，无法优雅订阅，只能由各自 Brain 转发。
+        /// </summary>
+        private void HandleAnyAttackCommitted(Combat.WeaponConfig weapon)
+        {
+            if (_character == null) return;
+            EnemyRegistry.BroadcastWeaponNoise(_character.transform.position);
+        }
+
+        /// <summary> 供 EnemyRegistry 广播调用：让本敌人的听觉处理一次外部武器声 </summary>
+        public void NotifyHeardWeaponNoise(Vector3 sourcePosition)
+        {
+            _hearing?.NotifyWeaponNoise(sourcePosition, transform.position);
+        }
+
+        /// <summary>
+        /// 从死亡恢复：重设出生点、清空计时与感知事实，并补装初始武器。
+        /// 只认 HealthController.ResetHealth（走 HealthReset 事件），避免依赖状态比较的时序。
+        /// </summary>
+        private void RecoverFromDeath()
+        {
+            _wasDead = false;
+            _aiContext.HomePosition = transform.position;
+            _aiContext.ResetTimers();
+            _blackboard.Reset();
+            _perception.Reset();
+            TryEquipInitialWeapon();
+        }
+
         private void TransitionTo(EnemyAIState kind, bool force = false)
         {
             IEnemyState next = ResolveState(kind);
@@ -276,7 +399,7 @@ namespace Enemy
         /// <summary> 决策调试可视化：视野锥、当前目标、最后已知位置与视线 </summary>
         private void OnDrawGizmosSelected()
         {
-            if (config == null || _character == null) return;
+            if (config == null || _character == null || !config.debugDrawState) return;
 
             Vector3 origin = transform.position;
             Vector3 eye = origin + Vector3.up * config.eyeHeight;
@@ -318,6 +441,30 @@ namespace Enemy
                 Vector3 patrolTarget = _patrolState.PatrolTarget;
                 Gizmos.DrawWireSphere(patrolTarget + Vector3.up * 0.1f, 0.3f);
                 Gizmos.DrawLine(eye, patrolTarget);
+            }
+
+            // 战术点：撤退红、包抄品红、对峙黄圈
+            if (CurrentState == EnemyAIState.Chase)
+            {
+                switch (_blackboard.TacticalChoice)
+                {
+                    case EnemyTacticalChoice.Retreat:
+                        Gizmos.color = Color.red;
+                        Gizmos.DrawWireSphere(_blackboard.RetreatPoint + Vector3.up * 0.1f, 0.35f);
+                        Gizmos.DrawLine(eye, _blackboard.RetreatPoint);
+                        break;
+
+                    case EnemyTacticalChoice.Flank:
+                        Gizmos.color = Color.magenta;
+                        Gizmos.DrawWireSphere(_blackboard.FlankPoint + Vector3.up * 0.1f, 0.35f);
+                        Gizmos.DrawLine(eye, _blackboard.FlankPoint);
+                        break;
+
+                    case EnemyTacticalChoice.Hold:
+                        Gizmos.color = Color.yellow;
+                        DrawHorizontalRing(eye, config.attackRange * config.holdDistanceFactor);
+                        break;
+                }
             }
         }
 

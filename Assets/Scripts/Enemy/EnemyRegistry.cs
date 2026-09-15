@@ -35,6 +35,25 @@ namespace Enemy
         }
 
         /// <summary>
+        /// 向所有角色广播一次武器声。
+        /// 战斗层还没有带位置的开火事件，只能这样近似；每个敌人的 EnemyHearing 会自行按距离过滤，
+        /// 并忽略自己发出的声音。低频调用，线性遍历可接受。
+        /// </summary>
+        public static void BroadcastWeaponNoise(Vector3 sourcePosition)
+        {
+            for (int i = Roots.Count - 1; i >= 0; i--)
+            {
+                CharacterRoot root = Roots[i];
+                if (root == null)
+                {
+                    Roots.RemoveAt(i);
+                    continue;
+                }
+                root.Brain?.NotifyHeardWeaponNoise(sourcePosition);
+            }
+        }
+
+        /// <summary>
         /// 查找范围内最近的存活玩家角色。
         /// 会顺带清理已销毁引用，避免角色被 Destroy 后残留空条目。
         /// </summary>

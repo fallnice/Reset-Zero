@@ -18,9 +18,26 @@ namespace Enemy
         public EnemyAIBlackboard Blackboard;
         public EnemyConfig Config;
         public EnemyNavigationGrid Grid;
+        public EnemyUtilityEvaluator Tactical;
         public Vector3 HomePosition;
         public float DeltaTime;
         public float NextAttackTime;
+
+        /// <summary> 包抄冷却剩余时间；跨状态保留，避免切状态就能立刻再包抄 </summary>
+        public float FlankCooldownRemaining;
+
+        /// <summary> 撤退冷却剩余时间；跨状态保留，避免撤退一结束就立刻再撤 </summary>
+        public float RetreatCooldownRemaining;
+
+        /// <summary> 当前战术已持续的秒数；用于包抄超时兜底 </summary>
+        public float TacticalElapsed;
+
+        /// <summary>
+        /// 从进入撤退开始累计的秒数。
+        /// 不能复用 TacticalElapsed：后者以 tacticalCommitSeconds 为上限，
+        /// 而撤退超时通常比它长，复用会导致超时永不触发。
+        /// </summary>
+        public float RetreatElapsed;
 
         /// <summary> 导航失败/卡住的累计时长；Patrol/ReturnHome 用它做兜底逃逸 </summary>
         public float NavigationFailedTime;
@@ -56,8 +73,21 @@ namespace Enemy
         {
             NextAttackTime = 0f;
             NavigationFailedTime = 0f;
+            FlankCooldownRemaining = 0f;
+            RetreatCooldownRemaining = 0f;
+            TacticalElapsed = 0f;
+            RetreatElapsed = 0f;
             _hasPendingTransition = false;
             _pendingTransition = default;
+        }
+
+        /// <summary> 递减跨状态的冷却计时 </summary>
+        public void TickCooldowns(float deltaTime)
+        {
+            if (FlankCooldownRemaining > 0f)
+                FlankCooldownRemaining = Mathf.Max(0f, FlankCooldownRemaining - deltaTime);
+            if (RetreatCooldownRemaining > 0f)
+                RetreatCooldownRemaining = Mathf.Max(0f, RetreatCooldownRemaining - deltaTime);
         }
 
         /// <summary> 累计导航失败时长；导航正常时清零 </summary>

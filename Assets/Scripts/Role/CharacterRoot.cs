@@ -442,6 +442,15 @@ namespace Role
         /// <summary> 装备控制器（子控制器，未拖拽且未自动找到时为 null） </summary>
         public Controllers.EquipmentController Equipment => equipmentCtrl;
 
+        /// <summary> 敌人 AI 大脑（玩家角色为 null）；由 EnemyBrain.Awake 注册，供广播与诊断使用 </summary>
+        public Enemy.EnemyBrain Brain { get; private set; }
+
+        /// <summary> 由 EnemyBrain 注册自身，便于按角色广播；未注册时为 null </summary>
+        public void SetBrain(Enemy.EnemyBrain brain)
+        {
+            Brain = brain;
+        }
+
         /// <summary> FullBody 状态写入基础移动动画；有表现适配器时按参数契约安全写入 </summary>
         public void SetLocomotionAnimation(float speed, bool isGrounded)
         {

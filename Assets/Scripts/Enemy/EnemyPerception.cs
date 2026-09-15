@@ -194,8 +194,9 @@ namespace Enemy
             }
 
             CoverStatus cover = blocked ? CoverStatus.Full : CoverStatus.None;
-            ThreatLevel threat = blackboard.HealthRatio <= 0.35f ? ThreatLevel.High : ThreatLevel.Low;
-            blackboard.SetTacticalInfo(cover, threat);
+            // 威胁阈值走配置，避免与 Utility 的撤退阈值各写一份导致改了配置却不生效
+            bool critical = blackboard.HealthRatio <= config.threatLevelHealthRatio;
+            blackboard.SetTacticalInfo(cover, critical ? ThreatLevel.High : ThreatLevel.Low);
         }
     }
 }

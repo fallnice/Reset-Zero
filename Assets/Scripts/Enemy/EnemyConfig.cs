@@ -23,6 +23,11 @@ namespace Enemy
         public LayerMask losObstacleMask;
         [Min(0f)] public float losTargetTolerance = 0.25f; // 允许射线略超过目标，避免目标自身挡住视线
 
+        [Header("听觉（TODO 待战斗层补开火事件）")]
+        [Min(0f)] public float hearingRange = 12f;         // 能听到动静的水平半径；0 = 关闭听觉
+        [Range(0f, 1f)] public float damageSuspicionBoost = 0.6f;      // 受击时追加的怀疑度
+        [Range(0f, 1f)] public float weaponNoiseSuspicionBoost = 0.35f; // 听到武器声追加的怀疑度
+
         [Header("记忆与怀疑度")]
         [Min(0f)] public float targetMemorySeconds = 4f;      // 最后已知位置的有效记忆时长
         [Range(0f, 1f)] public float investigateSuspicionThreshold = 0.5f; // 进入 Investigate 的怀疑度阈值
@@ -59,9 +64,21 @@ namespace Enemy
         [Min(0.5f)] public float investigateSeconds = 3f; // 到达可疑点后的搜索时长
         [Min(0f)] public float returnHomeDistance = 25f;  // 离出生点超过该距离就放弃追击/搜索，0 = 不限制
 
+        [Header("战术（4.3 Utility）")]
+        [Range(0f, 1f)] public float retreatHealthRatio = 0.35f;    // 生命低于此比例强制后撤
+        [Range(0f, 1f)] public float threatLevelHealthRatio = 0.35f; // 生命低于此比例视为高威胁
+        [Min(0.5f)] public float retreatDurationSeconds = 2.5f;      // 单次撤退最长持续，超时回压上
+        [Min(0f)] public float retreatCooldownSeconds = 4f;          // 两次撤退之间的冷却
+        [Min(0.5f)] public float flankTimeoutSeconds = 4f;           // 包抄超时，绕不到就放弃
+        [Min(0f)] public float tacticalCommitSeconds = 1f;       // 战术保持时长，抑制评分抖动
+        [Min(0.5f)] public float flankDistance = 4f;             // 包抄点相对目标的距离
+        [Range(10f, 120f)] public float flankAngle = 60f;        // 包抄点相对「目标→自己」的偏转角
+        [Min(0f)] public float flankCooldownSeconds = 6f;        // 两次包抄之间的冷却
+        [Min(0.1f)] public float holdDistanceFactor = 1.2f;      // 对峙时保持的距离 = attackRange × 该系数
+
         [Header("调试")]
-        [Tooltip("周期性打印当前 AI 状态与导航状态（每 30 帧一次），排查行为异常时开启")]
-        public bool debugDrawState;
+        [Tooltip("选中敌人时显示 AI 调试 Gizmos：视野锥、巡逻点、战术点与怀疑目标")]
+        public bool debugDrawState = true;
 
         [Header("初始武器")]
         [Tooltip("敌人开局装备的近战武器；为空则敌人无法攻击")]
