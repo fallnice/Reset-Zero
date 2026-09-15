@@ -90,4 +90,5 @@ namespace Enemy
             if (loseTargetRange < detectionRange)
                 loseTargetRange = detectionRange;
         }
+    }
 }

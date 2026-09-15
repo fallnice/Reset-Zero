@@ -1,5 +1,6 @@
 using UnityEngine;
 using Role;
+using Role.Controllers;
 using Role.Core;
 using Enemy.Navigation;
 using Enemy.States;
@@ -308,7 +309,7 @@ namespace Enemy
             // 依赖未就绪时不置位，留给 Start 或后续帧重试；CharacterRoot.Awake 晚于本组件的 Awake/OnEnable。
             if (_character == null) return;
 
-            Controllers.EquipmentController equipment = _character.Equipment;
+            EquipmentController equipment = _character.Equipment;
             Combat.HealthController health = _character.Health;
             if (equipment == null || health == null) return;
 
@@ -323,7 +324,7 @@ namespace Enemy
         {
             if (!_runtimeEventsSubscribed) return;
 
-            Controllers.EquipmentController equipment = _character != null ? _character.Equipment : null;
+            EquipmentController equipment = _character != null ? _character.Equipment : null;
             if (equipment != null)
                 equipment.AttackCommitted -= HandleAnyAttackCommitted;
 
