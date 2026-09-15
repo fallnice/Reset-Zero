@@ -14,12 +14,15 @@ namespace Enemy.States
         public virtual void OnUpdate(EnemyAIContext context) { }
         public virtual void OnExit(EnemyAIContext context) { }
 
-        /// <summary> 驱动导航并把移动意图写入 AI 输入；不可移动时只停止，不 Tick 导航 </summary>
-        protected static void MoveTo(EnemyAIContext context, Vector3 destination)
+        /// <summary>
+        /// 驱动导航并把移动意图写入 AI 输入；不可移动时只停止，不 Tick 导航。
+        /// stoppingDistance ≥ 0 时覆盖配置的战斗停止距离（调查需要真正走到可疑点）。
+        /// </summary>
+        protected static void MoveTo(EnemyAIContext context, Vector3 destination, float stoppingDistance = -1f)
         {
             if (context == null || context.Navigation == null) return;
 
-            context.Navigation.SetDestination(destination);
+            context.Navigation.SetDestination(destination, stoppingDistance);
 
             if (context.Character != null && !context.Character.CanMove)
             {

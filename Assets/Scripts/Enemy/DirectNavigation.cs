@@ -13,6 +13,7 @@ namespace Enemy
         private EnemyConfig _config;
         private Vector3 _destination;
         private bool _hasDestination;
+        private float _stoppingDistanceOverride = -1f;
 
         public Vector3 MoveDirection { get; private set; }
         public Vector3 Destination => _destination;
@@ -33,9 +34,10 @@ namespace Enemy
             _config = config;
         }
 
-        public void SetDestination(Vector3 destination)
+        public void SetDestination(Vector3 destination, float stoppingDistance)
         {
             _destination = destination;
+            _stoppingDistanceOverride = stoppingDistance;
             _hasDestination = true;
         }
 
@@ -49,7 +51,9 @@ namespace Enemy
 
             Vector3 toTarget = _destination - _agent.position;
             toTarget.y = 0f;
-            float stoppingDistance = Mathf.Min(_config.navigationStoppingDistance, _config.attackRange);
+            float stoppingDistance = _stoppingDistanceOverride >= 0f
+                ? _stoppingDistanceOverride
+                : Mathf.Min(_config.navigationStoppingDistance, _config.attackRange);
             if (toTarget.sqrMagnitude <= stoppingDistance * stoppingDistance)
             {
                 MoveDirection = Vector3.zero;

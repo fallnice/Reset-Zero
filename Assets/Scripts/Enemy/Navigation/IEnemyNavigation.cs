@@ -41,7 +41,9 @@ namespace Enemy.Navigation
         bool IsStuck { get; }
 
         void Initialize(Transform agent, CharacterController controller, EnemyConfig config);
-        void SetDestination(Vector3 destination);
+
+        /// <summary> stoppingDistance &lt; 0 表示使用配置默认的战斗停止距离 </summary>
+        void SetDestination(Vector3 destination, float stoppingDistance);
         void Tick(float deltaTime);
         void Stop();
     }

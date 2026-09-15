@@ -62,6 +62,11 @@ namespace Enemy
         [Min(1)] public int patrolPickAttempts = 6;       // 每次取点的随机尝试次数，取不到则回到待机
         [Min(0.5f)] public float navigationFailureTimeout = 3f; // 导航连续失败/卡住多久后放弃当前巡逻或归位
         [Min(0.5f)] public float investigateSeconds = 3f; // 到达可疑点后的搜索时长
+        [Tooltip("调查时真正贴近可疑点的距离；小于该值会覆盖战斗停止距离(1.5m)，否则敌人会停在墙角另一侧，视线仍被挡")]
+        [Min(0.1f)] public float investigateArriveDistance = 0.6f;
+        [Tooltip("扫完可疑点后，在其周围额外搜索的点数上限；0 = 只搜可疑点本身")]
+        [Min(0)] public int investigateMaxSearchPoints = 2;
+        [Min(0.5f)] public float investigateSearchRadius = 3f; // 额外搜索点距可疑点的半径
         [Min(0f)] public float returnHomeDistance = 25f;  // 离出生点超过该距离就放弃追击/搜索，0 = 不限制
 
         [Header("战术（4.3 Utility）")]

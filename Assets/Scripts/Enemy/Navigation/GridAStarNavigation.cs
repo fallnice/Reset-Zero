@@ -25,6 +25,7 @@ namespace Enemy.Navigation
         private float _noProgressTime;
         private Vector3 _lastProgressPosition;
         private EnemyNavigationFailure _lastLoggedFailure = EnemyNavigationFailure.None;
+        private float _stoppingDistanceOverride = -1f;
 
         public Vector3 MoveDirection => _moveDirection;
         public Vector3 Destination => _destination;
@@ -52,9 +53,10 @@ namespace Enemy.Navigation
             _lastProgressPosition = agent != null ? agent.position : Vector3.zero;
         }
 
-        public void SetDestination(Vector3 destination)
+        public void SetDestination(Vector3 destination, float stoppingDistance)
         {
             _destination = destination;
+            _stoppingDistanceOverride = stoppingDistance;
             _hasDestination = true;
         }
 
@@ -88,7 +90,9 @@ namespace Enemy.Navigation
                 return;
             }
 
-            float stoppingDistance = Mathf.Min(_config.navigationStoppingDistance, _config.attackRange);
+            float stoppingDistance = _stoppingDistanceOverride >= 0f
+                ? _stoppingDistanceOverride
+                : Mathf.Min(_config.navigationStoppingDistance, _config.attackRange);
             float destinationSqrDistance = HorizontalSqrDistance(_agent.position, _destination);
 
             // 最后一段已进入攻击停止距离时视为到达，不强迫角色挤进玩家占据的终点格中心。
@@ -119,6 +123,7 @@ namespace Enemy.Navigation
         public void Stop()
         {
             _hasDestination = false;
+            _stoppingDistanceOverride = -1f;
             _pathCount = 0;
             _waypointIndex = 0;
             _moveDirection = Vector3.zero;

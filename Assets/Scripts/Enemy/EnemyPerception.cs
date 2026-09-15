@@ -59,8 +59,24 @@ namespace Enemy
             else
                 blackboard.SetLineOfSight(false, Vector3.zero);
 
+            DropStaleTarget(config, blackboard);
             UpdateSuspicion(self, config, blackboard);
             UpdateTacticalInfo(self, config, blackboard);
+        }
+
+        /// <summary>
+        /// 目标脱离视线超过记忆时长后脱锁——只清「锁定」，保留最后已知位置。
+        /// 否则 Chase 因为仍有目标而永不降级：敌人走到最后已知位置后既不搜索也不归位，
+        /// 表现为「躲墙后就不追了」。
+        /// </summary>
+        private void DropStaleTarget(EnemyConfig config, EnemyAIBlackboard blackboard)
+        {
+            if (_target == null || blackboard.HasLineOfSight) return;
+            if (blackboard.TimeSinceLastSeen <= config.targetMemorySeconds) return;
+
+            _target = null;
+            _distanceToTarget = 0f;
+            blackboard.SetTarget(null, 0f);
         }
 
         /// <summary> 已锁定目标时刷新距离；目标死亡或超出丢失距离则脱锁 </summary>
@@ -92,8 +108,16 @@ namespace Enemy
                     self.transform.position, config.detectionRange, self, out CharacterRoot candidate, out float d))
                 return;
 
-            _target = candidate;
+            // 只锁定真正看得见的目标：否则隔墙也会被反复锁定，
+            // 敌人会在 Chase（去旧位置）与 Investigate（去同一个位置）之间来回横跳。
             _distanceToTarget = d;
+            if (!IsVisible(self, config, candidate, out Vector3 _))
+            {
+                _distanceToTarget = 0f;
+                return;
+            }
+
+            _target = candidate;
         }
 
         /// <summary> 计算视线（距离 + 视野角 + 射线遮挡）并写入最后已知位置 </summary>
@@ -167,7 +191,12 @@ namespace Enemy
             }
             else
             {
-                _suspicion = Mathf.Max(0f, _suspicion - config.suspicionDecayPerSecond * Time.deltaTime);
+                // 无锁定目标：还在「记忆 + 搜索」窗口内且记得位置时维持怀疑度，
+                // 否则 Investigate 还没走到可疑点就被判定为放弃
+                bool keepSearching = blackboard.HasLastKnownPosition
+                    && blackboard.TimeSinceLastSeen < config.targetMemorySeconds + config.investigateSeconds;
+                if (!keepSearching)
+                    _suspicion = Mathf.Max(0f, _suspicion - config.suspicionDecayPerSecond * Time.deltaTime);
             }
 
             blackboard.SetSuspicion(_suspicion);
