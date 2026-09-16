@@ -28,7 +28,8 @@ param(
     [string]$Project = "",
     [string]$UnityPath = "",
     [int]$TimeoutSeconds = 180,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$IncludePlayMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,14 +65,15 @@ function Get-UnityExe {
 }
 
 function Invoke-UnityBatch {
-    param([string]$LogPath, [string]$ExecuteMethod)
-    $args = @('-batchmode', '-nographics', '-quit',
-              '-projectPath', ('"{0}"' -f $Project),
-              '-logFile', ('"{0}"' -f $LogPath))
+    param([string]$LogPath, [string]$ExecuteMethod, [switch]$NoQuit)
+    $argList = @('-batchmode', '-nographics')
+    if (-not $NoQuit) { $argList += '-quit' }
+    $argList += @('-projectPath', ('"{0}"' -f $Project),
+                  '-logFile', ('"{0}"' -f $LogPath))
     if ($ExecuteMethod) {
-        $args += @('-executeMethod', $ExecuteMethod)
+        $argList += @('-executeMethod', $ExecuteMethod)
     }
-    $p = Start-Process -FilePath $Unity -ArgumentList $args -PassThru -WindowStyle Hidden
+    $p = Start-Process -FilePath $Unity -ArgumentList $argList -PassThru -WindowStyle Hidden
     if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
         throw "Unity batch mode timed out after $TimeoutSeconds s. Check $LogPath"
@@ -130,6 +132,7 @@ if ($Unity) { Write-Host "[AutoCheck] Unity: $Unity" }
 
 $compilePass = $null   # $null = skipped
 $auditPass = $null     # $null = skipped
+$playPass = $null      # $null = skipped (only runs with -IncludePlayMode)
 
 if ($Unity) {
     # Refuse to run while the editor has this project open: concurrent batchmode
@@ -181,17 +184,47 @@ if ($Unity) {
         Write-Host "       Unity run log: $auditRunLog"
         $auditPass = $false
     }
+
+    # ---------- Step 3 (optional): PlayMode smoke ----------
+    # Runs the scene headless in PlayMode and samples runtime behaviour.
+    # NOTE: launched WITHOUT -quit - the entry method calls EditorApplication.Exit()
+    # itself once sampling is done (otherwise Unity would quit immediately).
+    if ($IncludePlayMode) {
+        Write-Host '[3/4] PlayMode smoke (headless, takes 2-4 min) ...'
+        $pmLog = Join-Path $env:TEMP 'unity_playmode_audit.log'
+        $pmRunLog = Join-Path $env:TEMP 'unity_playmode_run.log'
+        Remove-Item $pmLog, $pmRunLog -ErrorAction SilentlyContinue
+
+        try {
+            $null = Invoke-UnityBatch -LogPath $pmRunLog -ExecuteMethod 'EditorTools.PlayModeSmokeCheck.RunFromCommandLine' -NoQuit
+        } catch {
+            Write-Host "[WARN] PlayMode run did not finish cleanly: $($_.Exception.Message)"
+        }
+
+        if (Test-Path $pmLog) {
+            Get-Content $pmLog | ForEach-Object { Write-Host ("  " + $_) }
+            $playPass = [bool](Select-String -Path $pmLog -Pattern 'PLAYMODE_AUDIT_RESULT: PASS' -Quiet)
+        } else {
+            Write-Host "[FAIL] PlayMode result log not generated: $pmLog"
+            Write-Host "       Unity run log: $pmRunLog"
+            $playPass = $false
+        }
+    }
 }
 
 # ---------- Summary ----------
 Write-Host ''
-Write-Host ("[AutoCheck] Static : " + $(if ($staticPass) { 'PASS' } else { 'FAIL' }))
-Write-Host ("[AutoCheck] Compile: " + $(if ($null -eq $compilePass) { 'SKIPPED' } elseif ($compilePass) { 'PASS' } else { 'FAIL' }))
-Write-Host ("[AutoCheck] Scene  : " + $(if ($null -eq $auditPass) { 'SKIPPED' } elseif ($auditPass) { 'PASS' } else { 'FAIL' }))
+Write-Host ("[AutoCheck] Static  : " + $(if ($staticPass) { 'PASS' } else { 'FAIL' }))
+Write-Host ("[AutoCheck] Compile : " + $(if ($null -eq $compilePass) { 'SKIPPED' } elseif ($compilePass) { 'PASS' } else { 'FAIL' }))
+Write-Host ("[AutoCheck] Scene   : " + $(if ($null -eq $auditPass) { 'SKIPPED' } elseif ($auditPass) { 'PASS' } else { 'FAIL' }))
+if ($IncludePlayMode) {
+    Write-Host ("[AutoCheck] PlayMode: " + $(if ($null -eq $playPass) { 'SKIPPED' } elseif ($playPass) { 'PASS' } else { 'FAIL' }))
+}
 
 $overallPass = ($staticPass) -and
                ($null -eq $compilePass -or $compilePass) -and
-               ($null -eq $auditPass -or $auditPass)
+               ($null -eq $auditPass -or $auditPass) -and
+               ($null -eq $playPass -or $playPass)
 
 if ($overallPass) {
     Write-Host 'AUTO CHECK: ALL PASS'
