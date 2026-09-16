@@ -27,12 +27,16 @@ namespace Enemy.States
             if (context.Character != null && !context.Character.CanMove)
             {
                 // 死亡/眩晕等强状态下暂停 Tick，避免静止被误诊为卡住
+                context.LocalAvoidance?.Reset();
                 context.AiInput?.SetMoveDirection(Vector3.zero);
                 return;
             }
 
             context.Navigation.Tick(context.DeltaTime);
             Vector3 move = context.Navigation.MoveDirection;
+            // 局部避障只修正导航意图，最终位移仍由统一的角色移动链执行。
+            if (context.LocalAvoidance != null)
+                move = context.LocalAvoidance.AdjustDirection(move, context.DeltaTime);
             context.AiInput?.SetMoveDirection(move);
             if (move.sqrMagnitude > 0.0001f)
                 context.AiInput?.SetLookDirection(move);
@@ -71,16 +75,20 @@ namespace Enemy.States
 
         /// <summary>
         /// 是否已到达某个水平位置。
-        /// 同时校验物理距离，避免导航把「吸附后的路径终点」误判为到达目标本身。
+        /// 同时按本次停止距离校验物理距离，避免导航把「吸附后的路径终点」误判为到达目标本身。
         /// </summary>
-        protected static bool HasArrived(EnemyAIContext context, Vector3 position)
+        protected static bool HasArrived(
+            EnemyAIContext context,
+            Vector3 position,
+            float stoppingDistance = -1f)
         {
             if (context == null || context.Character == null || context.Config == null) return false;
             if (context.Navigation == null || !context.Navigation.HasReachedDestination) return false;
 
-            float tolerance = Mathf.Max(
-                context.Config.navigationStoppingDistance,
-                context.Config.waypointReachDistance) * 3f;
+            float requestedDistance = stoppingDistance >= 0f
+                ? stoppingDistance
+                : Mathf.Min(context.Config.navigationStoppingDistance, context.Config.attackRange);
+            float tolerance = Mathf.Max(requestedDistance, context.Config.waypointReachDistance);
 
             Vector3 delta = context.Character.transform.position - position;
             delta.y = 0f;

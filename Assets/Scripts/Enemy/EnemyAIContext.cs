@@ -15,6 +15,7 @@ namespace Enemy
         public CharacterRoot Character;
         public AIInputProvider AiInput;
         public IEnemyNavigation Navigation;
+        public ILocalAvoidance LocalAvoidance;
         public EnemyAIBlackboard Blackboard;
         public EnemyConfig Config;
         public EnemyNavigationGrid Grid;
@@ -103,9 +104,11 @@ namespace Enemy
             NavigationFailedTime = failing ? NavigationFailedTime + deltaTime : 0f;
         }
 
+        /// <summary> 统一停止导航、局部避障和移动输入，防止任一层保留上帧方向。 </summary>
         public void StopMovement()
         {
             Navigation?.Stop();
+            LocalAvoidance?.Reset();
             AiInput?.SetMoveDirection(Vector3.zero);
         }
 

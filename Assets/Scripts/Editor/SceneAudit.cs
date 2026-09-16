@@ -376,6 +376,39 @@ namespace EditorTools
                 {
                     if (config.navigationStoppingDistance > config.attackRange)
                         issues.Add($"{brain.name}: navigationStoppingDistance 必须 <= attackRange");
+                    if (config.localAvoidanceEnabled)
+                    {
+                        int agentMask = config.avoidanceAgentMask.value;
+                        int obstacleMask = config.navigationObstacleMask.value;
+                        int agentLayerBit = 1 << brain.gameObject.layer;
+                        if (agentMask == 0)
+                            issues.Add($"{brain.name}: 已启用局部避障，但 avoidanceAgentMask 为空");
+                        else if ((agentMask & agentLayerBit) == 0)
+                            issues.Add($"{brain.name}: avoidanceAgentMask 未包含角色所在层 {brain.gameObject.layer}");
+                        if (obstacleMask == 0)
+                            issues.Add($"{brain.name}: 已启用局部避障，但 navigationObstacleMask 为空");
+                        else
+                        {
+                            Collider[] ownColliders = brain.GetComponentsInChildren<Collider>(true);
+                            for (int colliderIndex = 0; colliderIndex < ownColliders.Length; colliderIndex++)
+                            {
+                                Collider ownCollider = ownColliders[colliderIndex];
+                                if ((obstacleMask & (1 << ownCollider.gameObject.layer)) == 0) continue;
+
+                                issues.Add($"{brain.name}: navigationObstacleMask 不应包含自身碰撞体 "
+                                    + $"{ownCollider.name} 所在层 {ownCollider.gameObject.layer}");
+                                break;
+                            }
+                        }
+                        if (config.avoidanceNeighborRadius <= 0f)
+                            issues.Add($"{brain.name}: avoidanceNeighborRadius 必须 > 0");
+                        if (config.avoidanceInterestWeight <= 0f)
+                            issues.Add($"{brain.name}: avoidanceInterestWeight 必须 > 0");
+                        if (config.avoidanceDangerWeight <= 0f)
+                            issues.Add($"{brain.name}: avoidanceDangerWeight 必须 > 0");
+                        if (config.avoidanceSeparationWeight <= 0f)
+                            issues.Add($"{brain.name}: avoidanceSeparationWeight 必须 > 0");
+                    }
                     if (config.meleeWeapon == null)
                         issues.Add($"{brain.name}: EnemyConfig.meleeWeapon 未赋值");
                     else if (config.meleeWeapon.type != WeaponType.Melee)

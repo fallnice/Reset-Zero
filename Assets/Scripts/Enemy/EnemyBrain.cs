@@ -39,6 +39,7 @@ namespace Enemy
         private readonly EnemyPerception _perception = new EnemyPerception();
         private readonly EnemyAIBlackboard _blackboard = new EnemyAIBlackboard();
         private IEnemyNavigation _navigation;
+        private ILocalAvoidance _localAvoidance;
 
         /// <summary> 决策黑板（供调试/表现层与后续 Utility 读取） </summary>
         public EnemyAIBlackboard Blackboard => _blackboard;
@@ -48,6 +49,7 @@ namespace Enemy
         private IEnemyState _currentState;
         private bool _runtimeEventsSubscribed;
         private bool _wasDead;
+        private bool _hasStarted;
 
         private readonly IdleState _idleState = new IdleState();
         private readonly PatrolState _patrolState = new PatrolState();
@@ -64,6 +66,27 @@ namespace Enemy
         public EnemyNavigationStatus NavigationStatus => _navigation != null
             ? _navigation.Status
             : EnemyNavigationStatus.Failed;
+        /// <summary> 最近一次导航失败原因。 </summary>
+        public EnemyNavigationFailure NavigationFailure => _navigation != null
+            ? _navigation.LastFailure
+            : EnemyNavigationFailure.GridUnavailable;
+        /// <summary> 局部避障状态。 </summary>
+        public LocalAvoidanceStatus AvoidanceStatus => _localAvoidance != null
+            ? _localAvoidance.Status
+            : LocalAvoidanceStatus.Disabled;
+        /// <summary> 局部避障最近一次识别到的邻居数。 </summary>
+        public int AvoidanceNeighborCount => _localAvoidance != null ? _localAvoidance.NeighborCount : 0;
+        /// <summary> 邻居查询缓冲区是否在最近一次采样中被填满。 </summary>
+        public bool IsAvoidanceNeighborBufferSaturated =>
+            _localAvoidance != null && _localAvoidance.IsNeighborBufferSaturated;
+        /// <summary> 寻路层给出的原始方向。 </summary>
+        public Vector3 RawNavigationDirection => _localAvoidance != null
+            ? _localAvoidance.RawDirection
+            : (_navigation != null ? _navigation.MoveDirection : Vector3.zero);
+        /// <summary> 写入 AIInputProvider 前的最终修正方向。 </summary>
+        public Vector3 AdjustedNavigationDirection => _localAvoidance != null
+            ? _localAvoidance.AdjustedDirection
+            : (_navigation != null ? _navigation.MoveDirection : Vector3.zero);
 
         private void Awake()
         {
@@ -72,8 +95,12 @@ namespace Enemy
             // 注册到角色上，EnemyRegistry 才能把武器声广播给本敌人
             if (_character != null)
                 _character.SetBrain(this);
+            CharacterController controller = GetComponent<CharacterController>();
             ResolveNavigation();
-            _navigation?.Initialize(transform, GetComponent<CharacterController>(), config);
+            _navigation?.Initialize(transform, controller, config);
+            // 避障保持为纯 C# 策略对象，不增加 Prefab 组件负担；与导航共用角色和控制器依赖。
+            _localAvoidance = new ContextSteeringAvoidance();
+            _localAvoidance.Initialize(transform, controller, config);
 
             // 听觉：受击自己订阅，武器声由下面的 AttackCommitted 转发给它
             _hearing = GetComponent<EnemyHearing>();
@@ -116,11 +143,15 @@ namespace Enemy
         private void OnEnable()
         {
             SubscribeRuntimeEvents();
+            // 首次启用后 Start 会完成初始化；仅对后续重新启用执行池化状态清理。
+            if (_hasStarted)
+                ResetAfterEnable();
         }
 
         private void OnDisable()
         {
             UnsubscribeRuntimeEvents();
+            ClearInputAndNavigation();
         }
 
         private void OnDestroy()
@@ -138,6 +169,20 @@ namespace Enemy
                 _hearing?.TrySubscribe();
             }
             SubscribeRuntimeEvents();
+            TryEquipInitialWeapon();
+            _hasStarted = true;
+        }
+
+        /// <summary> 池化或临时禁用后恢复到干净的待机决策状态。 </summary>
+        private void ResetAfterEnable()
+        {
+            // 先清输入与导航，再退出旧状态，避免旧状态阶段数据在恢复首帧继续驱动角色。
+            ClearInputAndNavigation();
+            _aiContext.ResetTimers();
+            _blackboard.Reset();
+            _perception.Reset();
+            _currentState?.OnExit(_aiContext);
+            _currentState = null;
             TryEquipInitialWeapon();
         }
 
@@ -165,6 +210,7 @@ namespace Enemy
             if (config == null)
             {
                 Debug.LogWarning("[EnemyBrain] 未分配 EnemyConfig，敌人 AI 已停止", this);
+                ClearInputAndNavigation();
                 enabled = false;
                 return;
             }
@@ -178,6 +224,7 @@ namespace Enemy
             _aiContext.Character = _character;
             _aiContext.AiInput = _aiInput;
             _aiContext.Navigation = _navigation;
+            _aiContext.LocalAvoidance = _localAvoidance;
             _aiContext.Blackboard = _blackboard;
             _aiContext.Config = config;
             _aiContext.DeltaTime = Time.deltaTime;
@@ -222,6 +269,17 @@ namespace Enemy
 
             if (_aiContext.HasPendingTransition)
                 TransitionTo(_aiContext.PendingTransition);
+        }
+
+        /// <summary> 安全停止导航、避障、移动和攻击输出。 </summary>
+        private void ClearInputAndNavigation()
+        {
+            _navigation?.Stop();
+            _localAvoidance?.Reset();
+            if (_aiInput == null) return;
+
+            _aiInput.SetMoveDirection(Vector3.zero);
+            _aiInput.SetAttackPressed(false);
         }
 
         private bool IsStunned()
@@ -429,6 +487,18 @@ namespace Enemy
             {
                 Gizmos.color = _blackboard.HasLineOfSight ? Color.green : Color.gray;
                 Gizmos.DrawLine(eye, _blackboard.Target.transform.position);
+            }
+
+            // 导航与局部避障：青色为原始方向，蓝色为最终方向，白圈为邻居查询范围。
+            if (_localAvoidance != null)
+            {
+                Gizmos.color = Color.white;
+                DrawHorizontalRing(origin, config.avoidanceNeighborRadius);
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawRay(origin + Vector3.up * 0.15f, RawNavigationDirection * 1.2f);
+                Gizmos.color = AvoidanceStatus == LocalAvoidanceStatus.Blocked
+                    || IsAvoidanceNeighborBufferSaturated ? Color.red : Color.blue;
+                Gizmos.DrawRay(origin + Vector3.up * 0.22f, AdjustedNavigationDirection * 1.2f);
             }
 
             // 出生点与巡逻范围

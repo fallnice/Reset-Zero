@@ -107,7 +107,9 @@ namespace Enemy.States
             // 必须真正走到可疑点：用战斗停止距离(1.5m)会停在离黄框一步之遥，视线仍被墙角挡住
             MoveTo(context, destination, context.Config.investigateArriveDistance);
 
-            if (HasArrived(context, destination) || HasNavigationFailed(context))
+            // 到达判定必须复用上方传给导航的调查距离，不能退回较大的战斗停止距离。
+            if (HasArrived(context, destination, context.Config.investigateArriveDistance)
+                || HasNavigationFailed(context))
             {
                 StopMovement(context);
                 _arrived = true;

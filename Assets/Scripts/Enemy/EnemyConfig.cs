@@ -55,6 +55,24 @@ namespace Enemy
         [Min(0.01f)] public float stuckMinProgress = 0.1f;
         [Min(0.1f)] public float stuckTimeout = 1.5f;
 
+        [Header("导航 - 局部避障")]
+        [Tooltip("在导航输出与角色输入之间启用 Context Steering；关闭时原方向直通")]
+        public bool localAvoidanceEnabled = true;
+        [Tooltip("邻近敌人的查询层；必须包含敌人角色所在层，查询后会去重并过滤自己、玩家和死亡角色")]
+        public LayerMask avoidanceAgentMask = ~0;
+        [Min(0.1f)] public float avoidanceNeighborRadius = 1.8f;
+        [Min(0.02f)] public float avoidanceQueryInterval = 0.15f;
+        [Min(0f)] public float avoidanceObstacleProbeDistance = 1.2f;
+        [Range(0.1f, 1f)] public float avoidanceProbeRadiusFactor = 0.75f;
+        [Min(0f)] public float avoidanceInterestWeight = 1f;
+        [Min(0f)] public float avoidanceDangerWeight = 2f;
+        [Min(0f)] public float avoidanceSeparationWeight = 1.4f;
+        [Min(0f)] public float avoidanceTurnPenalty = 0.1f;
+        [Min(0f)] public float avoidanceDirectionPersistence = 0.12f;
+        [Range(0f, 1f)] public float avoidanceActivationDanger = 0.05f;
+        [Tooltip("最高候选分数不超过此值时安全停止，避免强行挤入封闭方向")]
+        public float avoidanceBlockedScore = 0.02f;
+
         [Header("行为（4.1 HFSM）")]
         [Min(0.5f)] public float idleSeconds = 2f;        // 待机多久后开始巡逻（下限避免待机/巡逻高频切换）
         [Min(0.5f)] public float patrolRadius = 8f;       // 巡逻取点半径（以出生点为圆心）

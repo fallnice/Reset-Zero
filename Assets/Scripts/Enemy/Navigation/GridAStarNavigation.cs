@@ -23,7 +23,7 @@ namespace Enemy.Navigation
         private float _nextRepathTime;
         private float _stuckSampleTimer;
         private float _noProgressTime;
-        private Vector3 _lastProgressPosition;
+        private float _lastWaypointDistance;
         private EnemyNavigationFailure _lastLoggedFailure = EnemyNavigationFailure.None;
         private float _stoppingDistanceOverride = -1f;
 
@@ -50,7 +50,7 @@ namespace Enemy.Navigation
             // 错开不同敌人的首轮重算时刻，避免同帧集中寻路。
             float phase = Mathf.Abs(GetInstanceID() % 100) * 0.001f;
             _nextRepathTime = Time.time + phase;
-            _lastProgressPosition = agent != null ? agent.position : Vector3.zero;
+            _lastWaypointDistance = float.PositiveInfinity;
         }
 
         public void SetDestination(Vector3 destination, float stoppingDistance)
@@ -117,9 +117,11 @@ namespace Enemy.Navigation
             toWaypoint.y = 0f;
             _moveDirection = toWaypoint.sqrMagnitude > 0.0001f ? toWaypoint.normalized : Vector3.zero;
             Status = EnemyNavigationStatus.Moving;
+            // 使用 waypoint 进展而非总位移，避免局部避障横移掩盖真正卡住。
             UpdateStuckDetection(deltaTime, now);
         }
 
+        /// <summary> 停止当前路径并清空失败、卡住与重算节流状态。 </summary>
         public void Stop()
         {
             _hasDestination = false;
@@ -129,6 +131,8 @@ namespace Enemy.Navigation
             _moveDirection = Vector3.zero;
             _stuckSampleTimer = 0f;
             _noProgressTime = 0f;
+            _lastWaypointDistance = float.PositiveInfinity;
+            _nextRepathTime = Time.time;
             Status = EnemyNavigationStatus.Idle;
             LastFailure = EnemyNavigationFailure.None;
         }
@@ -158,7 +162,7 @@ namespace Enemy.Navigation
             _waypointIndex = 0;
             _stuckSampleTimer = 0f;
             _noProgressTime = 0f;
-            _lastProgressPosition = _agent.position;
+            _lastWaypointDistance = float.PositiveInfinity;
             Status = EnemyNavigationStatus.Moving;
             LastFailure = EnemyNavigationFailure.None;
             _lastLoggedFailure = EnemyNavigationFailure.None;
@@ -168,10 +172,17 @@ namespace Enemy.Navigation
         private void AdvanceWaypoints()
         {
             float reachSqr = _config.waypointReachDistance * _config.waypointReachDistance;
+            int previousIndex = _waypointIndex;
             while (_waypointIndex < _pathCount
                 && HorizontalSqrDistance(_agent.position, grid.GetNodePosition(_path[_waypointIndex])) <= reachSqr)
             {
                 _waypointIndex++;
+            }
+
+            if (_waypointIndex != previousIndex)
+            {
+                _lastWaypointDistance = float.PositiveInfinity;
+                _noProgressTime = 0f;
             }
         }
 
@@ -182,8 +193,10 @@ namespace Enemy.Navigation
             _moveDirection = Vector3.zero;
             _stuckSampleTimer = 0f;
             _noProgressTime = 0f;
+            _lastWaypointDistance = float.PositiveInfinity;
         }
 
+        /// <summary> 按接近当前路径点的实际进展累计卡住时间，忽略无效横移或原地绕行。 </summary>
         private void UpdateStuckDetection(float deltaTime, float now)
         {
             if (_moveDirection.sqrMagnitude < 0.01f) return;
@@ -193,13 +206,16 @@ namespace Enemy.Navigation
 
             float sampleDuration = _stuckSampleTimer;
             _stuckSampleTimer = 0f;
-            float progressSqr = HorizontalSqrDistance(_agent.position, _lastProgressPosition);
-            if (progressSqr < _config.stuckMinProgress * _config.stuckMinProgress)
+            float waypointDistance = Mathf.Sqrt(HorizontalSqrDistance(
+                _agent.position,
+                grid.GetNodePosition(_path[_waypointIndex])));
+            float progress = _lastWaypointDistance - waypointDistance;
+            if (!float.IsPositiveInfinity(_lastWaypointDistance) && progress < _config.stuckMinProgress)
                 _noProgressTime += sampleDuration;
             else
                 _noProgressTime = 0f;
 
-            _lastProgressPosition = _agent.position;
+            _lastWaypointDistance = waypointDistance;
             if (_noProgressTime < _config.stuckTimeout) return;
 
             _pathCount = 0;
