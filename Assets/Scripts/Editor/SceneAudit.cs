@@ -376,6 +376,8 @@ namespace EditorTools
                 {
                     if (config.navigationStoppingDistance > config.attackRange)
                         issues.Add($"{brain.name}: navigationStoppingDistance 必须 <= attackRange");
+                    if (config.attackCommitFallbackSeconds <= 0f)
+                        issues.Add($"{brain.name}: attackCommitFallbackSeconds 必须 > 0，才能启用敌人攻击前摇兜底");
                     if (config.localAvoidanceEnabled)
                     {
                         int agentMask = config.avoidanceAgentMask.value;

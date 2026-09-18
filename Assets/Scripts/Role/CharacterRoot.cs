@@ -88,7 +88,6 @@ namespace Role
             Animator = GetComponentInChildren<Animator>(true);
             _upperBodyAnimationSink = GetComponentInChildren<StateMachine.IUpperBodyAnimationSink>(true);
             _animationController = GetComponentInChildren<Controllers.CharacterAnimationController>(true);
-            EnsureAnimatorEventRelay();
 
             // 获取或自动添加协调器
             if (coordinator == null)
@@ -120,6 +119,9 @@ namespace Role
             // 由根节点显式注入依赖，避免子控制器 Awake 顺序不确定
             if (equipmentCtrl != null)
                 equipmentCtrl.Init(this, coordinator);
+
+            // 动画桥依赖已解析的 EquipmentController，必须在上述注入完成后初始化。
+            EnsureAnimatorEventRelay();
 
             // 检查 CharacterController
             if (GetComponent<CharacterController>() == null)
@@ -291,7 +293,12 @@ namespace Role
             bool shouldAttack = inputProvider.AttackPressedThisFrame
                 || (equipmentCtrl.UsesContinuousAttackInput && inputProvider.AttackHeld);
             if (shouldAttack)
-                equipmentCtrl.Attack();
+            {
+                float fallbackSeconds = inputProvider is IAttackTimingProvider timingProvider
+                    ? timingProvider.AttackCommitFallbackSeconds
+                    : 0f;
+                equipmentCtrl.Attack(fallbackSeconds);
+            }
         }
 
         /// <summary> 将装备完成事实映射为上半身持续姿态 </summary>

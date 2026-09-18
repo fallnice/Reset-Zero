@@ -69,7 +69,7 @@ namespace Enemy.States
             if (context == null || context.Config == null || context.AiInput == null) return;
             if (Time.time < context.NextAttackTime) return;
 
-            context.AiInput.SetAttackPressed(true);
+            context.AiInput.SetAttackPressed(true, context.Config.attackCommitFallbackSeconds);
             context.NextAttackTime = Time.time + context.Config.attackCooldown;
         }
 

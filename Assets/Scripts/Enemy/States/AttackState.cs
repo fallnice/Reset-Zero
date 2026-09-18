@@ -28,11 +28,17 @@ namespace Enemy.States
                 return;
             }
 
-            // 近战命中方向取决于角色朝向，攻击前先对准目标
+            // 前摇期间持续面向目标；命中帧到来时近战范围会按最新朝向判定，而不是锁死起手方向。
             Vector3 toTarget = context.Blackboard.Target.transform.position
                 - context.Character.transform.position;
             FaceDirection(context, toTarget);
             TryRequestAttack(context);
+        }
+
+        /// <summary> 离开攻击态时取消尚未到达命中帧的攻击，防止追击、眩晕或死亡后仍补出伤害 </summary>
+        public override void OnExit(EnemyAIContext context)
+        {
+            context?.Character?.Equipment?.CancelPendingAttack();
         }
     }
 }

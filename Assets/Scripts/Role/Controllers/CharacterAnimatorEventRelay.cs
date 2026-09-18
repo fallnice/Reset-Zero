@@ -12,6 +12,7 @@ namespace Role.Controllers
     {
         private CharacterAnimationController _animationController;
         private AudioController _audioController;
+        private EquipmentController _equipmentController;
 
         /// <summary> 由 CharacterRoot.Awake 显式初始化，避免依赖组件 Awake 顺序 </summary>
         public void Initialize(CharacterRoot character)
@@ -19,6 +20,7 @@ namespace Role.Controllers
             if (character == null) return;
             _animationController = character.GetComponentInChildren<CharacterAnimationController>(true);
             _audioController = character.GetComponentInChildren<AudioController>(true);
+            _equipmentController = character.Equipment;
         }
 
         private void Awake()
@@ -37,6 +39,12 @@ namespace Role.Controllers
         public void PlayFootSound()
         {
             _audioController?.PlayFootstep();
+        }
+
+        /// <summary> 接收攻击剪辑命中帧事件；无事件的旧剪辑仍由装备层超时兜底结算 </summary>
+        public void AttackHit()
+        {
+            _equipmentController?.CommitPendingAttack();
         }
 
         /// <summary> 接管 Animator Root Motion，角色位移继续由 CharacterController 驱动 </summary>

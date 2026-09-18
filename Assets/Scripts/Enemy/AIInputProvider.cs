@@ -9,11 +9,15 @@ namespace Enemy
     /// 攻击边缘标志不在此处自动清除，而由 EnemyBrain 每帧决策前重置、决策后设置，
     /// 避免 LateUpdate 清除与 CharacterRoot.Update 读取之间的时序竞态。
     /// </summary>
-    public class AIInputProvider : MonoBehaviour, IAIInputProvider
+    public class AIInputProvider : MonoBehaviour, IAIInputProvider, IAttackTimingProvider
     {
         private Vector3 _moveDirection;
         private Vector3 _lookDirection = Vector3.forward;
         private bool _attackPressedThisFrame;
+        private float _attackCommitFallbackSeconds;
+
+        /// <summary> 动画未发送命中事件时，装备层自动结算攻击的兜底秒数 </summary>
+        public float AttackCommitFallbackSeconds => _attackCommitFallbackSeconds;
 
         /// <summary> 由 EnemyBrain 写入本帧移动方向（世界空间，已归一化） </summary>
         public void SetMoveDirection(Vector3 direction) => _moveDirection = direction;
@@ -21,8 +25,13 @@ namespace Enemy
         /// <summary> 由 EnemyBrain 写入本帧注视方向（世界空间） </summary>
         public void SetLookDirection(Vector3 direction) => _lookDirection = direction;
 
-        /// <summary> 由 EnemyBrain 写入本帧攻击意图（边缘触发，下帧决策前会被重置） </summary>
-        public void SetAttackPressed(bool pressed) => _attackPressedThisFrame = pressed;
+        /// <summary> 由 EnemyBrain 写入本帧攻击意图与命中兜底时长；下帧只清边缘标志，保留本次参数供消费 </summary>
+        public void SetAttackPressed(bool pressed, float commitFallbackSeconds = 0f)
+        {
+            _attackPressedThisFrame = pressed;
+            if (pressed)
+                _attackCommitFallbackSeconds = Mathf.Max(0f, commitFallbackSeconds);
+        }
 
         // ===== IInputProvider =====
 

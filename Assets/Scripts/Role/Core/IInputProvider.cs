@@ -7,6 +7,13 @@ namespace Role.Core
     /// <summary> AI 输入源标记；用于角色身份容错，不增加额外输入成员 </summary>
     public interface IAIInputProvider : IInputProvider { }
 
+    /// <summary> 可选攻击时序接口；允许 AI 请求带前摇且支持 Animation Event 命中帧的攻击 </summary>
+    public interface IAttackTimingProvider
+    {
+        /// <summary> 动画未发送命中事件时，自动结算攻击的兜底秒数 </summary>
+        float AttackCommitFallbackSeconds { get; }
+    }
+
     public interface IInputProvider
     {
         /// <summary> 世界空间移动方向（已归一化） </summary>

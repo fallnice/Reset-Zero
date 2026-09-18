@@ -36,6 +36,8 @@ namespace Enemy
         [Header("攻击")]
         [Min(0f)] public float attackRange = 2f;         // 进入攻击状态的距离
         [Min(0.01f)] public float attackCooldown = 1.2f; // AI 决策层两次攻击请求的最小间隔
+        [Tooltip("攻击动画未触发 AttackHit 事件时，经过该秒数自动结算；0 = 保持旧版即时结算")]
+        [Min(0f)] public float attackCommitFallbackSeconds = 0.45f;
 
         [Header("导航 - 通用")]
         [Min(0.1f)] public float obstacleAvoidDistance = 1.5f; // DirectNavigation 前方障碍检测距离

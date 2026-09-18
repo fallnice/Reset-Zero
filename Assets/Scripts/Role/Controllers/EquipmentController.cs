@@ -57,6 +57,14 @@ namespace Role.Controllers
         private float _switchTimer;
         private WeaponConfig _pendingWeapon;
 
+        // 攻击请求先锁定本次结算参数，再等待 Animation Event 命中帧；超时则自动结算，避免错误配置让攻击失效。
+        private bool _hasPendingAttack;
+        private float _pendingAttackTimer;
+        private WeaponConfig _pendingAttackWeapon;
+        private IWeaponBehavior _pendingAttackBehavior;
+        private float _pendingAttackMultiplier;
+        private Vector3 _pendingAimDirection;
+
         // 换装分两段：Put（收旧武器，此时动画集还没换）→ 落位 → Take（掏新武器）。
         // 只用一个计时器 + 一个阶段标志，不给两段各维护一份状态。
         private SwitchPhase _phase = SwitchPhase.None;
@@ -97,6 +105,7 @@ namespace Role.Controllers
         public bool CanAttack => _coordinator != null
             && _coordinator.CanAttack
             && !IsSwitching
+            && !_hasPendingAttack
             && _currentWeapon != null
             && _currentBehavior != null
             && AttackCooldownRemaining <= 0f;
@@ -118,6 +127,30 @@ namespace Role.Controllers
         }
 
         private void Update()
+        {
+            UpdatePendingAttack();
+            UpdateWeaponSwitch();
+        }
+
+        /// <summary> 推进待结算攻击；Animation Event 缺失时在配置时限到达后自动命中 </summary>
+        private void UpdatePendingAttack()
+        {
+            if (!_hasPendingAttack) return;
+
+            // 死亡、眩晕等强状态必须在命中帧前取消，不能让失去行动能力的角色延迟造成伤害。
+            if (_coordinator != null && !_coordinator.CanAttack)
+            {
+                CancelPendingAttack();
+                return;
+            }
+
+            _pendingAttackTimer -= Time.deltaTime;
+            if (_pendingAttackTimer <= 0f)
+                CommitPendingAttack();
+        }
+
+        /// <summary> 推进收起/掏出武器过渡；与攻击前摇分开计时，避免任一流程提前 return 阻断另一流程 </summary>
+        private void UpdateWeaponSwitch()
         {
             if (_phase == SwitchPhase.None) return;
 
@@ -319,6 +352,9 @@ namespace Role.Controllers
         /// <summary> 开始换装第一段：演「收武器」；没武器可收或 putDuration 为 0 时跳过，直接落位 </summary>
         private void BeginSwitch(WeaponConfig target)
         {
+            // 切换武器会改变行为策略与模型，旧攻击快照不能跨武器继续结算。
+            CancelPendingAttack();
+
             // _currentWeapon == null 覆盖「开局首次装备」与「空手捡枪」：手上本来就空的，
             // 没有收武器可演；否则出生后要白等 0.55 秒才拿上武器
             if (_currentWeapon == null || putDuration <= 0f)
@@ -399,19 +435,69 @@ namespace Role.Controllers
             }
         }
 
-        /// <summary> 尝试执行一次攻击；被角色状态、切换或冷却阻断时返回 false </summary>
-        public bool Attack()
+        /// <summary>
+        /// 尝试发起一次攻击；fallbackSeconds 大于 0 时先播放前摇，等待 AttackHit 动画事件或超时结算。
+        /// 玩家与旧调用方保持默认 0，仍为即时攻击；被角色状态、切换、待结算攻击或冷却阻断时返回 false。
+        /// </summary>
+        public bool Attack(float fallbackSeconds = 0f)
         {
-            if (!CanAttack || _character == null) return false;
+            if (!CanAttack || _character == null || _character.Context == null) return false;
             if (!TryGetSlotIndex(_currentSlot, out int index)) return false;
 
-            float attackMultiplier = _character.Context.CombatStats.attackMultiplier;
-            Vector3 aimDirection = _character.GetAimDirection();
-            _currentBehavior.Attack(_character.transform, _currentWeapon, attackMultiplier, aimDirection);
-
+            _pendingAttackWeapon = _currentWeapon;
+            _pendingAttackBehavior = _currentBehavior;
+            _pendingAttackMultiplier = _character.Context.CombatStats.attackMultiplier;
+            _pendingAimDirection = _character.GetAimDirection();
             _nextAttackAllowedTimes[index] = Time.time + CurrentAttackInterval;
+
+            // AttackCommitted 表示攻击动作已被接受，动画、听觉和瞄准表现应在前摇开始时立即响应。
             AttackCommitted?.Invoke(_currentWeapon);
+
+            if (fallbackSeconds <= 0f)
+            {
+                _hasPendingAttack = true;
+                CommitPendingAttack();
+                return true;
+            }
+
+            _pendingAttackTimer = fallbackSeconds;
+            _hasPendingAttack = true;
             return true;
+        }
+
+        /// <summary> 在攻击动画命中帧结算当前攻击；重复或迟到的 Animation Event 会安全忽略 </summary>
+        public bool CommitPendingAttack()
+        {
+            if (!_hasPendingAttack) return false;
+
+            IWeaponBehavior behavior = _pendingAttackBehavior;
+            WeaponConfig weapon = _pendingAttackWeapon;
+            float multiplier = _pendingAttackMultiplier;
+            Vector3 aimDirection = _pendingAimDirection;
+            ClearPendingAttack();
+
+            if (_character == null || behavior == null || weapon == null) return false;
+            if (_coordinator != null && !_coordinator.CanAttack) return false;
+
+            behavior.Attack(_character.transform, weapon, multiplier, aimDirection);
+            return true;
+        }
+
+        /// <summary> 取消尚未到达命中帧的攻击；用于脱离攻击态、切武器、死亡与眩晕 </summary>
+        public void CancelPendingAttack()
+        {
+            ClearPendingAttack();
+        }
+
+        /// <summary> 清除攻击快照，保证超时与 Animation Event 两条结算路径最多命中一次 </summary>
+        private void ClearPendingAttack()
+        {
+            _hasPendingAttack = false;
+            _pendingAttackTimer = 0f;
+            _pendingAttackWeapon = null;
+            _pendingAttackBehavior = null;
+            _pendingAttackMultiplier = 0f;
+            _pendingAimDirection = Vector3.zero;
         }
 
         /// <summary> 计算当前武器的实际攻击间隔；近战攻速倍率越高，间隔越短 </summary>
@@ -448,10 +534,12 @@ namespace Role.Controllers
         // ===== IStateResponder =====
         public void OnStateEnter(CharacterState state)
         {
-            // 死亡/眩晕/过场等禁用装备操作的强状态会立即中断尚未落位的 Put/Take。
-            // Put 阶段保留旧武器，Take 阶段保留已落位的新武器，均不再延迟切 Controller。
+            // 死亡/眩晕/过场等强状态会同时中断换装与攻击前摇，避免动作被打断后仍延迟造成伤害。
             if (!CanChangeEquipmentNow())
+            {
                 CancelSwitch();
+                CancelPendingAttack();
+            }
         }
 
         public void OnStateExit(CharacterState state) { }
