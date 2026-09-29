@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Combat;
 using Enemy;
 using Enemy.Navigation;
 using Role;
@@ -62,10 +63,12 @@ namespace EditorTools
         private const float MinApproach = 1.0f;         // 追击阶段至少要缩短的距离（米）
         private const float MaxBlockedRatio = 0.4f;     // 避障阻塞帧占比上限
         private const float MinPairDistance = 0.35f;    // 敌人两两最小间距（过小=挤在一起）
+        private const float MinWindupSeconds = 0.05f;   // 起手到结算的最小间隔（小于它=没有前摇，仍是即时命中）
 
         private sealed class EnemySample
         {
             public EnemyBrain Brain;
+            public CharacterRoot Root;
             public Vector3 LastPosition;
             public float MovedDistance;
             public float StartDistanceToPlayer = -1f;
@@ -98,6 +101,25 @@ namespace EditorTools
         private static float _minPairDistance = float.MaxValue;
         private static int _navFailWarnings;   // 运行期 A* 报 NoProgress 的次数
         private static Vector3 _playerPlannedPosition;   // 计划把玩家放到的位置（校验瞬移是否生效）
+
+        // ── 攻击观察（09-18 批次：前摇 / 命中帧 / 取消兜底） ──
+        private static int _attackStarts;       // 敌人攻击起手次数（EquipmentController.AttackCommitted）
+        private static int _damageEvents;       // 玩家受伤次数（HealthController.Damaged）
+        private static float _firstAttackTime = -1f;
+        private static float _firstDamageTime = -1f;
+
+        // 取消测试：清场后只留一个敌人，它一起手就击杀，看迟到的伤害会不会补上
+        private const float CancelSettleSeconds = 1.0f;        // 清场后等其它敌人死透
+        private const float CancelWaitAttackSeconds = 10.0f;   // 等目标起手
+        private const float CancelObserveSeconds = 2.5f;       // 起手后观察窗口（须 > 兜底 0.45s）
+        private const float CancelKillDamage = 9999f;
+        private static int _cancelStage;                       // 0 清场 1 等起手 2 观察
+        private static float _cancelStageStart;
+        private static bool _cancelBaselineSet;
+        private static float _cancelBaseline;
+        private static EnemySample _cancelTarget;
+        private static float _cancelLastAttackTry;
+        private static string _cancelResult;
 
         static PlayModeSmokeCheck()
         {
@@ -208,7 +230,95 @@ namespace EditorTools
                     SampleFrame();
                     if (now - _phaseStart < ChaseSeconds) break;
                     _gcAtChaseEnd = GC.GetTotalMemory(false);
-                    // 报告必须在退出 PlayMode 之前写完：退出会触发域重载，采样数据会一起没
+                    SetPhase(4, now);
+                    break;
+
+                case 4:
+                    TickCancelTest(now);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 取消测试：清场只留一个敌人，它一起手就击杀，观察窗口内玩家不应再掉血
+        /// （验证「前摇中死亡/眩晕会取消待结算攻击，迟到的事件不补伤害」）。
+        /// 报告同样要在退出 PlayMode 之前写完，所以这里直接收尾。
+        /// </summary>
+        private static void TickCancelTest(double now)
+        {
+            switch (_cancelStage)
+            {
+                case 0:
+                    // 只留一个活着的敌人，其余清场，避免其它人的伤害污染判定
+                    _cancelTarget = null;
+                    for (int i = 0; i < _samples.Count; i++)
+                    {
+                        EnemySample s = _samples[i];
+                        bool alive = s.Root != null && s.Root.Health != null
+                            && s.Root.Health.CurrentHealth > 0f;
+                        if (_cancelTarget == null && alive)
+                        {
+                            _cancelTarget = s;
+                            continue;
+                        }
+                        Kill(s);
+                    }
+
+                    // 摆位：把玩家挪到目标正前方（进入攻击距离），否则它可能一直在巡逻不发起攻击。
+                    // 瞬移同样要先禁用 CharacterController，并顺带让它面朝玩家。
+                    if (_cancelTarget != null && _player != null)
+                    {
+                        Transform t = _cancelTarget.Brain.transform;
+                        CharacterController cc = _player.GetComponent<CharacterController>();
+                        if (cc != null) cc.enabled = false;
+                        _player.transform.position = GroundPoint(t.position + t.forward * 1.2f);
+                        if (cc != null) cc.enabled = true;
+
+                        Vector3 facing = _player.transform.position - t.position;
+                        facing.y = 0f;
+                        if (facing.sqrMagnitude > 0.0001f)
+                            t.rotation = Quaternion.LookRotation(facing);
+                    }
+
+                    _cancelStageStart = (float)now;
+                    _cancelStage = 1;
+                    break;
+
+                case 1:
+                    if (now - _cancelStageStart < CancelSettleSeconds) break;
+                    if (!_cancelBaselineSet)
+                    {
+                        _cancelBaseline = _player != null && _player.Health != null
+                            ? _player.Health.CurrentHealth : 0f;
+                        _cancelBaselineSet = true;
+                        break;
+                    }
+                    // 等它自然起手太不稳定（可能在巡逻、可能刚进冷却），这里主动提交攻击请求；
+                    // 一旦起手，HandleEnemyAttackCommitted 会立刻击杀它并进入观察阶段
+                    if (_cancelTarget != null && _cancelTarget.Root != null
+                        && _cancelTarget.Root.Equipment != null
+                        && now - _cancelLastAttackTry > 0.5f)
+                    {
+                        _cancelLastAttackTry = (float)now;
+                        _cancelTarget.Root.Equipment.Attack(0.45f);
+                    }
+
+                    if (now - _cancelStageStart > CancelSettleSeconds + CancelWaitAttackSeconds)
+                    {
+                        _cancelResult = "SKIP 目标在 " + CancelWaitAttackSeconds.ToString("F0")
+                            + "s 内没有起手，本轮未触发取消测试";
+                        Finish(null);
+                    }
+                    break;
+
+                case 2:
+                    if (now - _cancelStageStart < CancelObserveSeconds) break;
+                    float hp = _player != null && _player.Health != null ? _player.Health.CurrentHealth : 0f;
+                    _cancelResult = hp < _cancelBaseline - 0.001f
+                        ? "FAIL 起手后击杀攻击者，玩家仍掉了 " + (_cancelBaseline - hp).ToString("F1")
+                          + " 血（迟到的伤害被补上了）"
+                        : "PASS 起手后击杀攻击者，观察 " + CancelObserveSeconds.ToString("F1")
+                          + "s 玩家血量未再变化（本次伤害已取消）";
                     Finish(null);
                     break;
             }
@@ -230,11 +340,17 @@ namespace EditorTools
             for (int i = 0; i < brains.Length; i++)
             {
                 if (brains[i] == null) continue;
-                _samples.Add(new EnemySample
+                EnemySample sample = new EnemySample
                 {
                     Brain = brains[i],
-                    LastPosition = brains[i].transform.position
-                });
+                    LastPosition = brains[i].transform.position,
+                    Root = brains[i].GetComponentInParent<CharacterRoot>()
+                };
+                _samples.Add(sample);
+
+                // 攻击起手：即便剪辑上没有 AttackHit 事件，兜底秒数到点也应自动结算一次
+                if (sample.Root != null && sample.Root.Equipment != null)
+                    sample.Root.Equipment.AttackCommitted += weapon => HandleEnemyAttackCommitted(sample);
             }
 
             _player = null;
@@ -247,6 +363,42 @@ namespace EditorTools
                     break;
                 }
             }
+
+            if (_player != null && _player.Health != null)
+                _player.Health.Damaged += HandlePlayerDamaged;
+        }
+
+        private static void HandleEnemyAttackCommitted(EnemySample sample)
+        {
+            _attackStarts++;
+            if (_firstAttackTime < 0f) _firstAttackTime = (float)EditorApplication.timeSinceStartup;
+
+            // 取消测试：目标一起手立刻击杀，之后迟到的动画事件/兜底都不许再补伤害
+            if (_cancelStage == 1 && _cancelBaselineSet && sample == _cancelTarget)
+            {
+                Kill(sample);
+                _cancelStage = 2;
+                _cancelStageStart = (float)EditorApplication.timeSinceStartup;
+            }
+        }
+
+        private static void HandlePlayerDamaged(float remainingHealth)
+        {
+            _damageEvents++;
+            if (_firstDamageTime < 0f) _firstDamageTime = (float)EditorApplication.timeSinceStartup;
+        }
+
+        private static void Kill(EnemySample sample)
+        {
+            if (sample == null || sample.Root == null || sample.Root.Health == null) return;
+            DamageContext context = new DamageContext
+            {
+                amount = CancelKillDamage,
+                attacker = _player != null ? _player.gameObject : null,
+                sourceFaction = Faction.Player,
+                hitPoint = sample.Brain.transform.position
+            };
+            sample.Root.Health.TakeDamage(context);
         }
 
         /// <summary>
@@ -464,6 +616,41 @@ namespace EditorTools
                     + " | 失败原因=" + s.LastNavFailure
                     + " | 平均方向模长=" + (s.Frames > 0 ? s.MoveDirSum / s.Frames : 0f).ToString("F2")
                     + " | 缓冲饱和帧=" + s.SaturatedFrames);
+            }
+
+            // 9. 攻击前摇与结算（09-18 批次：无动画事件时全部依赖 attackCommitFallbackSeconds 兜底）
+            if (_attackStarts > 0)
+            {
+                bool damaged = _damageEvents > 0;
+                sb.AppendLine((damaged ? "[PASS] " : "[FAIL] ")
+                    + "攻击结算: 敌人起手 " + _attackStarts + " 次 → 玩家受伤 " + _damageEvents
+                    + " 次（无 AttackHit 事件时应由兜底结算）");
+                if (damaged) pass++; else fail++;
+
+                bool once = _damageEvents <= _attackStarts;
+                sb.AppendLine((once ? "[PASS] " : "[FAIL] ")
+                    + "每个动作最多结算一次: 受伤 " + _damageEvents + " <= 起手 " + _attackStarts);
+                if (once) pass++; else fail++;
+
+                float delay = _firstDamageTime >= 0f && _firstAttackTime >= 0f
+                    ? _firstDamageTime - _firstAttackTime : -1f;
+                bool windup = delay >= MinWindupSeconds;
+                sb.AppendLine((windup ? "[PASS] " : "[FAIL] ")
+                    + "攻击前摇: 首次起手→首次结算 " + delay.ToString("F3") + " s（阈值 >= "
+                    + MinWindupSeconds.ToString("F2") + "；兜底配置越接近命中帧手感越好）");
+                if (windup) pass++; else fail++;
+            }
+            else
+            {
+                sb.AppendLine("[INFO] 攻击观察: 本轮敌人未发起攻击，攻击相关判定跳过");
+            }
+
+            if (!string.IsNullOrEmpty(_cancelResult))
+            {
+                bool cancelOk = _cancelResult.StartsWith("PASS");
+                if (cancelOk) pass++;
+                else if (!_cancelResult.StartsWith("SKIP")) fail++;
+                sb.AppendLine((cancelOk ? "[PASS] " : "[INFO] ") + "前摇取消: " + _cancelResult);
             }
 
             sb.AppendLine();
