@@ -379,6 +379,17 @@ namespace EditorTools
                         issues.Add($"{brain.name}: navigationStoppingDistance 必须 <= attackRange");
                     if (config.attackCommitFallbackSeconds <= 0f)
                         issues.Add($"{brain.name}: attackCommitFallbackSeconds 必须 > 0，才能启用敌人攻击前摇兜底");
+                    if (config.hearingRange > 0f && config.hearingClueLifetimeSeconds < 0.1f)
+                        issues.Add($"{brain.name}: hearingClueLifetimeSeconds 必须 >= 0.1");
+                    if (config.groupAlertEnabled)
+                    {
+                        if (config.groupAlertRange <= 0f)
+                            issues.Add($"{brain.name}: 已启用敌群报警，但 groupAlertRange 必须 > 0");
+                        if (config.groupAlertCooldownSeconds < 0.05f)
+                            issues.Add($"{brain.name}: groupAlertCooldownSeconds 必须 >= 0.05");
+                        if (config.groupAlertLifetimeSeconds < 0.1f)
+                            issues.Add($"{brain.name}: groupAlertLifetimeSeconds 必须 >= 0.1");
+                    }
                     if (config.localAvoidanceEnabled)
                     {
                         int agentMask = config.avoidanceAgentMask.value;

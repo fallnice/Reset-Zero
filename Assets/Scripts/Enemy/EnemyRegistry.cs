@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Combat;
 using Role;
 using UnityEngine;
 
@@ -16,12 +17,20 @@ namespace Enemy
     public static class EnemyRegistry
     {
         private static readonly List<CharacterRoot> Roots = new List<CharacterRoot>();
+        private static long _nextAlertSequence;
+
+        /// <summary> 最近一次报警成功投递的接收者数量，供无头验收和运行诊断读取。 </summary>
+        public static int LastAlertRecipientCount { get; private set; }
+        /// <summary> 当前运行期已创建的报警总数。 </summary>
+        public static long AlertSequence => _nextAlertSequence;
 
         /// <summary> 每次进入运行期前清空静态注册表，兼容关闭 Domain Reload 的编辑器设置。 </summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetRuntimeState()
         {
             Roots.Clear();
+            _nextAlertSequence = 0;
+            LastAlertRecipientCount = 0;
         }
 
         /// <summary> 当前注册的角色数量（调试用） </summary>
@@ -60,7 +69,7 @@ namespace Enemy
         /// 战斗层还没有带位置的开火事件，只能这样近似；每个敌人的 EnemyHearing 会自行按距离过滤，
         /// 并忽略自己发出的声音。低频调用，线性遍历可接受。
         /// </summary>
-        public static void BroadcastWeaponNoise(Vector3 sourcePosition)
+        public static void BroadcastWeaponNoise(CharacterRoot source, Vector3 sourcePosition)
         {
             for (int i = Roots.Count - 1; i >= 0; i--)
             {
@@ -71,8 +80,57 @@ namespace Enemy
                     continue;
                 }
                 if (!root.isActiveAndEnabled || !root.gameObject.activeInHierarchy) continue;
-                root.Brain?.NotifyHeardWeaponNoise(sourcePosition);
+                root.Brain?.NotifyHeardWeaponNoise(source, sourcePosition);
             }
+        }
+
+        /// <summary>
+        /// 把发送者亲眼确认的目标位置单跳投递给范围内同阵营敌人；接收者不会再次转发。
+        /// </summary>
+        public static int BroadcastGroupAlert(
+            CharacterRoot sender,
+            CharacterRoot target,
+            Vector3 confirmedPosition,
+            float range,
+            float lifetimeSeconds,
+            float suspicionBoost)
+        {
+            LastAlertRecipientCount = 0;
+            if (sender == null || target == null || range <= 0f || lifetimeSeconds <= 0f) return 0;
+            if (sender.Faction == Faction.Neutral || sender.Faction == target.Faction) return 0;
+
+            _nextAlertSequence++;
+            EnemyAlert alert = new EnemyAlert(
+                _nextAlertSequence,
+                sender,
+                target,
+                confirmedPosition,
+                sender.Faction,
+                Time.time + lifetimeSeconds,
+                suspicionBoost);
+            float rangeSqr = range * range;
+
+            for (int i = Roots.Count - 1; i >= 0; i--)
+            {
+                CharacterRoot root = Roots[i];
+                if (root == null)
+                {
+                    Roots.RemoveAt(i);
+                    continue;
+                }
+                if (root == sender || root.Faction != sender.Faction) continue;
+                if (!root.isActiveAndEnabled || !root.gameObject.activeInHierarchy) continue;
+                if (root.Health != null && root.Health.IsDead) continue;
+
+                Vector3 delta = root.transform.position - sender.transform.position;
+                delta.y = 0f;
+                if (delta.sqrMagnitude > rangeSqr) continue;
+                if (root.Brain == null || !root.Brain.ReceiveGroupAlert(alert)) continue;
+
+                LastAlertRecipientCount++;
+            }
+
+            return LastAlertRecipientCount;
         }
 
         /// <summary>

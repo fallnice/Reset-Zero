@@ -79,6 +79,8 @@ namespace EditorTools
             public int SaturatedFrames;
             public int NeighborSum;
             public bool SawChase;
+            public bool SawSharedAlert;
+            public long LastAlertSequence;
             public int NavFailedFrames;                         // 导航处于失败状态的帧数
             public EnemyNavigationFailure LastNavFailure;       // 最近一次导航失败原因
             public float MoveDirSum;                            // 输出方向模长累计（0=一直在原地磨）
@@ -472,6 +474,9 @@ namespace EditorTools
 
                 EnemyAIState state = s.Brain.CurrentState;
                 if (state == EnemyAIState.Chase || state == EnemyAIState.Attack) s.SawChase = true;
+                if (s.Brain.HasSharedAlert) s.SawSharedAlert = true;
+                if (s.Brain.LastReceivedAlertSequence > s.LastAlertSequence)
+                    s.LastAlertSequence = s.Brain.LastReceivedAlertSequence;
 
                 if (s.Brain.NavigationStatus == EnemyNavigationStatus.Failed) s.NavFailedFrames++;
                 if (s.Brain.NavigationFailure != EnemyNavigationFailure.None) s.LastNavFailure = s.Brain.NavigationFailure;
@@ -579,7 +584,18 @@ namespace EditorTools
                     + " m（< " + MinPairDistance.ToString("F2") + " 说明挤成一团）");
             }
 
-            // 6. GC（只记录：编辑器自身也分配，绝对值不能当证据）
+            // 6. 敌群报警（场景站位不保证有接收者，因此先记录传播事实，不强制判失败）
+            int alertReceivers = 0;
+            for (int i = 0; i < _samples.Count; i++)
+            {
+                EnemySample sample = _samples[i];
+                if (sample.SawSharedAlert || sample.LastAlertSequence > 0) alertReceivers++;
+            }
+            sb.AppendLine("[INFO] 敌群报警: 发布序列=" + EnemyRegistry.AlertSequence
+                + "，最后一次投递=" + EnemyRegistry.LastAlertRecipientCount
+                + "，本轮曾接收敌人=" + alertReceivers + "/" + _samples.Count);
+
+            // 7. GC（只记录：编辑器自身也分配，绝对值不能当证据）
             long gcDeltaKb = (_gcAtChaseEnd - _gcAtChaseStart) / 1024L;
             sb.AppendLine("[INFO] 追击阶段托管堆变化: "
                 + (gcDeltaKb >= 0 ? "+" : "") + gcDeltaKb + " KB / "
@@ -607,6 +623,8 @@ namespace EditorTools
                     + " | 状态=" + s.Brain.CurrentState
                     + " | 影响图=" + (s.Brain.IsInfluenceMapReady ? "Ready" : "Missing")
                     + " | 当前影响=" + s.Brain.CurrentInfluenceCost
+                    + " | 报警序列=" + s.LastAlertSequence
+                    + " | 见过报警=" + s.SawSharedAlert
                     + " | 见过Chase=" + s.SawChase
                     + " | 位移=" + s.MovedDistance.ToString("F2") + "m"
                     + " | 起始距玩家=" + s.StartDistanceToPlayer.ToString("F2") + "m"

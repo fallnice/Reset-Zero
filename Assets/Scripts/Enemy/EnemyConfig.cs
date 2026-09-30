@@ -27,11 +27,20 @@ namespace Enemy
         [Min(0f)] public float hearingRange = 12f;         // 能听到动静的水平半径；0 = 关闭听觉
         [Range(0f, 1f)] public float damageSuspicionBoost = 0.6f;      // 受击时追加的怀疑度
         [Range(0f, 1f)] public float weaponNoiseSuspicionBoost = 0.35f; // 听到武器声追加的怀疑度
+        [Min(0.1f)] public float hearingClueLifetimeSeconds = 3f;      // 听觉线索有效期
 
         [Header("记忆与怀疑度")]
         [Min(0f)] public float targetMemorySeconds = 4f;      // 最后已知位置的有效记忆时长
         [Range(0f, 1f)] public float investigateSuspicionThreshold = 0.5f; // 进入 Investigate 的怀疑度阈值
         [Min(0f)] public float suspicionDecayPerSecond = 0.25f; // 失去线索后的怀疑度衰减速度
+
+        [Header("敌群报警共享")]
+        public bool groupAlertEnabled = true;
+        [Min(0f)] public float groupAlertRange = 15f;
+        [Min(0.05f)] public float groupAlertCooldownSeconds = 1f;
+        [Min(0.1f)] public float groupAlertLifetimeSeconds = 4f;
+        [Range(0f, 1f)] public float groupAlertSuspicionBoost = 0.6f;
+        [Min(0f)] public float groupAlertRepublishMoveDistance = 2f;
 
         [Header("攻击")]
         [Min(0f)] public float attackRange = 2f;         // 进入攻击状态的距离
@@ -114,6 +123,13 @@ namespace Enemy
             // 丢失距离必须大于发现距离，否则迟滞退化成「刚发现就丢失」，敌人会在 Idle 与 Chase 之间抖动
             if (loseTargetRange < detectionRange)
                 loseTargetRange = detectionRange;
+
+            hearingClueLifetimeSeconds = Mathf.Max(0.1f, hearingClueLifetimeSeconds);
+            groupAlertRange = Mathf.Max(0f, groupAlertRange);
+            groupAlertCooldownSeconds = Mathf.Max(0.05f, groupAlertCooldownSeconds);
+            groupAlertLifetimeSeconds = Mathf.Max(0.1f, groupAlertLifetimeSeconds);
+            groupAlertSuspicionBoost = Mathf.Clamp01(groupAlertSuspicionBoost);
+            groupAlertRepublishMoveDistance = Mathf.Max(0f, groupAlertRepublishMoveDistance);
         }
     }
 }

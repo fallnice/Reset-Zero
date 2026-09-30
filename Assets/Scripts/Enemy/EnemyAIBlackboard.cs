@@ -60,6 +60,19 @@ namespace Enemy
 
         /// <summary> 是否有待处理的听觉线索 </summary>
         public bool HasHeardClue { get; private set; }
+        /// <summary> 听觉线索的绝对失效时间。 </summary>
+        public float HeardClueExpiresAt { get; private set; }
+        /// <summary> 调查态是否已锁定一个事实锚点；锁定后不受原始线索过期影响。 </summary>
+        public bool HasCommittedInvestigation { get; private set; }
+
+        /// <summary> 同阵营单位最近一次共享的目标确认位置。 </summary>
+        public Vector3 SharedAlertPosition { get; private set; }
+        /// <summary> 是否保存了一条尚未消费的共享报警。 </summary>
+        public bool HasSharedAlert { get; private set; }
+        /// <summary> 共享报警的绝对失效时间。 </summary>
+        public float SharedAlertExpiresAt { get; private set; }
+        /// <summary> 最近接受的报警序列，用于拒绝重复或乱序投递。 </summary>
+        public long LastSharedAlertSequence { get; private set; }
 
         /// <summary> 自身掩体状态 </summary>
         public CoverStatus Cover { get; private set; }
@@ -126,10 +139,21 @@ namespace Enemy
         /// 目前还缺一个带攻击者位置的「武器开火」事件，所以枪响只能用攻击者当前位置近似，
         /// 且无法区分近战与消音武器；等战斗层补 `Weapon_Fired(attacker, position)` 后替换。
         /// </summary>
-        public void SetHeardClue(Vector3 position)
+        public void SetHeardClue(Vector3 position, float lifetimeSeconds)
         {
             LastHeardPosition = position;
+            HeardClueExpiresAt = Time.time + Mathf.Max(0.1f, lifetimeSeconds);
             HasHeardClue = true;
+        }
+
+        /// <summary> 检查听觉线索是否仍有效；过期时同步清理位置和标记。 </summary>
+        public bool HasValidHeardClue(float now)
+        {
+            if (!HasHeardClue) return false;
+            if (now < HeardClueExpiresAt) return true;
+
+            ClearHeardClue();
+            return false;
         }
 
         /// <summary> 在现有怀疑度上追加一份（听到动静时使用），结果夹紧到 0~1 </summary>
@@ -142,6 +166,52 @@ namespace Enemy
         public void ClearHeardClue()
         {
             HasHeardClue = false;
+            HeardClueExpiresAt = 0f;
+            LastHeardPosition = Vector3.zero;
+        }
+
+        /// <summary> 标记调查态已经锁定事实锚点，感知层应维持怀疑度直到状态退出。 </summary>
+        public void BeginCommittedInvestigation()
+        {
+            HasCommittedInvestigation = true;
+        }
+
+        /// <summary> 调查结束或被更高优先级状态打断时释放怀疑度维持标记。 </summary>
+        public void EndCommittedInvestigation()
+        {
+            HasCommittedInvestigation = false;
+        }
+
+        /// <summary> 接受一条更新的共享报警，并把怀疑度提升到可调查水平。 </summary>
+        public bool TrySetSharedAlert(in EnemyAlert alert, float investigateThreshold)
+        {
+            if (alert.Sequence <= LastSharedAlertSequence || Time.time >= alert.ExpiresAt) return false;
+
+            SharedAlertPosition = alert.Position;
+            SharedAlertExpiresAt = alert.ExpiresAt;
+            LastSharedAlertSequence = alert.Sequence;
+            HasSharedAlert = true;
+            Suspicion = Mathf.Max(Suspicion, Mathf.Clamp01(Mathf.Max(
+                investigateThreshold, alert.SuspicionBoost)));
+            return true;
+        }
+
+        /// <summary> 检查共享报警是否仍有效；过期时立即清理事实。 </summary>
+        public bool HasValidSharedAlert(float now)
+        {
+            if (!HasSharedAlert) return false;
+            if (now < SharedAlertExpiresAt) return true;
+
+            ClearSharedAlert();
+            return false;
+        }
+
+        /// <summary> 消费或丢弃共享报警，但保留已接受序列以拒绝迟到重复包。 </summary>
+        public void ClearSharedAlert()
+        {
+            HasSharedAlert = false;
+            SharedAlertPosition = Vector3.zero;
+            SharedAlertExpiresAt = 0f;
         }
 
         /// <summary> 目标彻底丢失：清空目标与最后已知位置 </summary>
@@ -163,6 +233,9 @@ namespace Enemy
             ClearTarget();
             ClearHeardClue();
             LastHeardPosition = Vector3.zero;
+            ClearSharedAlert();
+            LastSharedAlertSequence = 0;
+            EndCommittedInvestigation();
             Suspicion = 0f;
             TimeSinceLastSeen = 0f;
             Cover = CoverStatus.None;

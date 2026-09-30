@@ -177,6 +177,11 @@ namespace Enemy
         /// </summary>
         private void UpdateSuspicion(CharacterRoot self, EnemyConfig config, EnemyAIBlackboard blackboard)
         {
+            // 听觉和群体报警由事件流写入黑板；先合并再计算，避免视觉层的内部缓存把外部提升覆盖掉。
+            _suspicion = Mathf.Max(_suspicion, blackboard.Suspicion);
+            bool hasSharedAlert = blackboard.HasValidSharedAlert(Time.time);
+            bool hasHeardClue = blackboard.HasValidHeardClue(Time.time);
+
             if (blackboard.HasLineOfSight)
             {
                 _suspicion = 1f;
@@ -193,8 +198,9 @@ namespace Enemy
             {
                 // 无锁定目标：还在「记忆 + 搜索」窗口内且记得位置时维持怀疑度，
                 // 否则 Investigate 还没走到可疑点就被判定为放弃
-                bool keepSearching = blackboard.HasLastKnownPosition
-                    && blackboard.TimeSinceLastSeen < config.targetMemorySeconds + config.investigateSeconds;
+                bool keepSearching = blackboard.HasCommittedInvestigation || hasSharedAlert || hasHeardClue
+                    || (blackboard.HasLastKnownPosition
+                        && blackboard.TimeSinceLastSeen < config.targetMemorySeconds + config.investigateSeconds);
                 if (!keepSearching)
                     _suspicion = Mathf.Max(0f, _suspicion - config.suspicionDecayPerSecond * Time.deltaTime);
             }

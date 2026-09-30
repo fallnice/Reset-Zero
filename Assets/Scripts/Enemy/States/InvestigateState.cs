@@ -20,6 +20,7 @@ namespace Enemy.States
         private int _searchPointsUsed;
         private bool _searchingSidePoint;
         private Vector3 _sidePoint;
+        private Vector3 _investigationAnchor;
 
         public override EnemyAIState Kind => EnemyAIState.Investigate;
 
@@ -32,6 +33,17 @@ namespace Enemy.States
             _searchPointsUsed = 0;
             _searchingSidePoint = false;
             _sidePoint = Vector3.zero;
+            _investigationAnchor = Vector3.zero;
+
+            if (context?.Blackboard == null) return;
+
+            context.Blackboard.BeginCommittedInvestigation();
+            if (context.Blackboard.HasValidSharedAlert(Time.time))
+            {
+                // 有效期只限制能否开始调查；进入状态后锁定锚点，长路径不会因报警过期突然返航。
+                _investigationAnchor = context.Blackboard.SharedAlertPosition;
+                context.Blackboard.ClearSharedAlert();
+            }
         }
 
         public override void OnUpdate(EnemyAIContext context)
@@ -84,13 +96,16 @@ namespace Enemy.States
                     // 搜索结束：清掉残留线索，否则黑板会一直认为「还记得位置」
                     context.Blackboard.ClearTarget();
                     context.Blackboard.ClearHeardClue();
+                    context.Blackboard.ClearSharedAlert();
                     context.RequestTransition(EnemyAIState.ReturnHome);
                 }
                 return;
             }
 
-            // 既没有听觉线索也没有最后已知位置时，不去世界原点，直接放弃搜索
-            if (!context.Blackboard.HasHeardClue
+            // 既没有共享报警、听觉线索也没有最后已知位置时，不去世界原点，直接放弃搜索。
+            if (_investigationAnchor == Vector3.zero
+                && !context.Blackboard.HasValidSharedAlert(Time.time)
+                && !context.Blackboard.HasValidHeardClue(Time.time)
                 && !context.Blackboard.HasLastKnownPosition
                 && !_searchingSidePoint)
             {
@@ -101,9 +116,16 @@ namespace Enemy.States
 
             Vector3 destination = _searchingSidePoint
                 ? _sidePoint
-                : context.Blackboard.HasHeardClue
-                    ? context.Blackboard.LastHeardPosition
-                    : context.Blackboard.LastKnownTargetPosition;
+                : _investigationAnchor != Vector3.zero
+                    ? _investigationAnchor
+                    : context.Blackboard.HasValidSharedAlert(Time.time)
+                        ? context.Blackboard.SharedAlertPosition
+                        : context.Blackboard.HasValidHeardClue(Time.time)
+                            ? context.Blackboard.LastHeardPosition
+                            : context.Blackboard.LastKnownTargetPosition;
+            if (!_searchingSidePoint)
+                _investigationAnchor = destination;
+
             // 必须真正走到可疑点：用战斗停止距离(1.5m)会停在离黄框一步之遥，视线仍被墙角挡住
             MoveTo(context, destination, context.Config.investigateArriveDistance);
 
@@ -116,6 +138,7 @@ namespace Enemy.States
                 _arriveTime = Time.time;
                 _searchingSidePoint = false;
                 context.Blackboard.ClearHeardClue();
+                context.Blackboard.ClearSharedAlert();
             }
         }
 
@@ -130,10 +153,16 @@ namespace Enemy.States
             if (grid == null || !grid.IsBuilt) return false;
             if (_searchPointsUsed >= context.Config.investigateMaxSearchPoints) return false;
 
-            EnemyAIBlackboard blackboard = context.Blackboard;
-            Vector3 anchor = blackboard.HasHeardClue
-                ? blackboard.LastHeardPosition
-                : blackboard.LastKnownTargetPosition;
+            Vector3 anchor = _investigationAnchor;
+            if (anchor == Vector3.zero)
+            {
+                EnemyAIBlackboard blackboard = context.Blackboard;
+                anchor = blackboard.HasValidSharedAlert(Time.time)
+                    ? blackboard.SharedAlertPosition
+                    : blackboard.HasValidHeardClue(Time.time)
+                        ? blackboard.LastHeardPosition
+                        : blackboard.LastKnownTargetPosition;
+            }
 
             for (int attempt = 0; attempt < 8; attempt++)
             {
@@ -171,8 +200,11 @@ namespace Enemy.States
 
         public override void OnExit(EnemyAIContext context)
         {
+            StopMovement(context);
+            context?.Blackboard?.EndCommittedInvestigation();
             _arrived = false;
             _searchingSidePoint = false;
+            _investigationAnchor = Vector3.zero;
         }
     }
 }

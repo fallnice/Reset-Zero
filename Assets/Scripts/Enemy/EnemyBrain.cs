@@ -41,6 +41,9 @@ namespace Enemy
         private readonly EnemyAIBlackboard _blackboard = new EnemyAIBlackboard();
         private IEnemyNavigation _navigation;
         private ILocalAvoidance _localAvoidance;
+        private float _nextGroupAlertTime;
+        private Vector3 _lastGroupAlertPosition;
+        private CharacterRoot _lastGroupAlertTarget;
 
         /// <summary> 决策黑板（供调试/表现层与后续 Utility 读取） </summary>
         public EnemyAIBlackboard Blackboard => _blackboard;
@@ -88,6 +91,10 @@ namespace Enemy
         public Vector3 AdjustedNavigationDirection => _localAvoidance != null
             ? _localAvoidance.AdjustedDirection
             : (_navigation != null ? _navigation.MoveDirection : Vector3.zero);
+        /// <summary> 最近接受的共享报警序列；0 表示当前运行期从未收到。 </summary>
+        public long LastReceivedAlertSequence => _blackboard.LastSharedAlertSequence;
+        /// <summary> 当前是否持有尚未过期或消费的共享报警。 </summary>
+        public bool HasSharedAlert => _blackboard.HasValidSharedAlert(Time.time);
         /// <summary> 当前场景影响图是否已构建并可供路径与战术采样。 </summary>
         public bool IsInfluenceMapReady => _aiContext.InfluenceMap != null && _aiContext.InfluenceMap.IsReady;
         /// <summary> 当前敌人所在格的动态影响成本；未就绪或越界时为 0。 </summary>
@@ -195,6 +202,7 @@ namespace Enemy
             _aiContext.ResetTimers();
             _blackboard.Reset();
             _perception.Reset();
+            ResetGroupAlertState();
             _currentState?.OnExit(_aiContext);
             _currentState = null;
             TryEquipInitialWeapon();
@@ -271,6 +279,7 @@ namespace Enemy
                     RecoverFromDeath();
 
                 _perception.Update(_character, config, _blackboard);
+                TryPublishGroupAlert();
 
                 // 战术计时：撤退与包抄的超时兜底依赖它，必须在状态执行前刷新
                 _aiContext.TacticalElapsed = _blackboard.GetTacticalElapsed(config.tacticalCommitSeconds);
@@ -390,7 +399,6 @@ namespace Enemy
             Combat.HealthController health = _character.Health;
             if (equipment == null || health == null) return;
 
-            equipment.AttackCommitted += HandleAnyAttackCommitted;
             health.Died += HandleHealthDied;
             health.HealthReset += HandleHealthReset;
 
@@ -400,10 +408,6 @@ namespace Enemy
         private void UnsubscribeRuntimeEvents()
         {
             if (!_runtimeEventsSubscribed) return;
-
-            EquipmentController equipment = _character != null ? _character.Equipment : null;
-            if (equipment != null)
-                equipment.AttackCommitted -= HandleAnyAttackCommitted;
 
             Combat.HealthController health = _character != null ? _character.Health : null;
             if (health != null)
@@ -427,21 +431,64 @@ namespace Enemy
                 _hearing.Initialize(_blackboard, _character.Health, config);
         }
 
-        /// <summary>
-        /// 本角色提交攻击：把攻击者位置作为声源广播给所有敌人。
-        /// 每个敌人的 EnemyHearing 会自己按距离过滤，并忽略自己的声音。
-        /// 全局 EventBus 不带位置，无法优雅订阅，只能由各自 Brain 转发。
-        /// </summary>
-        private void HandleAnyAttackCommitted(Combat.WeaponConfig weapon)
+        /// <summary> 供 EnemyRegistry 调用：过滤同阵营声源后让本敌人的听觉处理外部武器声。 </summary>
+        public void NotifyHeardWeaponNoise(CharacterRoot source, Vector3 sourcePosition)
         {
-            if (_character == null) return;
-            EnemyRegistry.BroadcastWeaponNoise(_character.transform.position);
+            if (!isActiveAndEnabled || _character == null
+                || source == _character || source != null && source.Faction == _character.Faction)
+                return;
+            _hearing?.NotifyWeaponNoise(sourcePosition, transform.position);
         }
 
-        /// <summary> 供 EnemyRegistry 广播调用：让本敌人的听觉处理一次外部武器声 </summary>
-        public void NotifyHeardWeaponNoise(Vector3 sourcePosition)
+        /// <summary> 接受范围内同阵营单位的单跳报警；只写调查事实，不直接授予目标锁定。 </summary>
+        public bool ReceiveGroupAlert(in EnemyAlert alert)
         {
-            _hearing?.NotifyWeaponNoise(sourcePosition, transform.position);
+            if (!isActiveAndEnabled || config == null || _character == null) return false;
+            if (!config.groupAlertEnabled || alert.Faction != _character.Faction) return false;
+            if (alert.ExpiresAt <= Time.time || alert.Sender == null || alert.Target == null
+                || !alert.Target.isActiveAndEnabled || !alert.Target.gameObject.activeInHierarchy
+                || alert.Target.Faction == _character.Faction)
+                return false;
+            if (alert.Target.Health != null && alert.Target.Health.IsDead) return false;
+            if (_blackboard.HasLineOfSight) return false;
+
+            return _blackboard.TrySetSharedAlert(alert, config.investigateSuspicionThreshold);
+        }
+
+        /// <summary> 仅由亲眼看见目标的敌人发布报警，并按冷却与目标位移限制重发。 </summary>
+        private void TryPublishGroupAlert()
+        {
+            if (!config.groupAlertEnabled || !_blackboard.HasLineOfSight || _blackboard.Target == null)
+                return;
+
+            CharacterRoot target = _blackboard.Target;
+            Vector3 confirmedPosition = target.transform.position;
+            float moveThreshold = config.groupAlertRepublishMoveDistance;
+            Vector3 delta = confirmedPosition - _lastGroupAlertPosition;
+            delta.y = 0f;
+            bool targetChanged = target != _lastGroupAlertTarget;
+            bool movedEnough = moveThreshold <= 0f
+                || delta.sqrMagnitude >= moveThreshold * moveThreshold;
+            if (!targetChanged && (Time.time < _nextGroupAlertTime || !movedEnough)) return;
+
+            EnemyRegistry.BroadcastGroupAlert(
+                _character,
+                target,
+                confirmedPosition,
+                config.groupAlertRange,
+                config.groupAlertLifetimeSeconds,
+                config.groupAlertSuspicionBoost);
+            _lastGroupAlertTarget = target;
+            _lastGroupAlertPosition = confirmedPosition;
+            _nextGroupAlertTime = Time.time + config.groupAlertCooldownSeconds;
+        }
+
+        /// <summary> 重置报警发布侧状态；黑板接收侧状态由 EnemyAIBlackboard.Reset 负责。 </summary>
+        private void ResetGroupAlertState()
+        {
+            _nextGroupAlertTime = 0f;
+            _lastGroupAlertPosition = Vector3.zero;
+            _lastGroupAlertTarget = null;
         }
 
         /// <summary>
@@ -455,6 +502,7 @@ namespace Enemy
             _aiContext.ResetTimers();
             _blackboard.Reset();
             _perception.Reset();
+            ResetGroupAlertState();
             TryEquipInitialWeapon();
         }
 

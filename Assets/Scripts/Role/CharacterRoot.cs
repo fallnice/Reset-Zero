@@ -315,6 +315,9 @@ namespace Role
             if (weapon == null || weapon.type != WeaponType.Ranged) return;
             upperBodySM?.TryPlayAction(StateMachine.UpperBodyAction.Fire);
 
+            // 声源身份必须从角色根节点发送，玩家没有 EnemyBrain，也要能产生敌人可听见的枪声。
+            Enemy.EnemyRegistry.BroadcastWeaponNoise(this, transform.position);
+
             // 开火即进入瞄准状态；松开瞄准键后由该计时器维持一小段再自动退出
             if (config != null)
                 _autoAimRemain = config.aimAutoHoldSeconds;

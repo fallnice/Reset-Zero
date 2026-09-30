@@ -106,7 +106,7 @@ namespace Enemy
             delta.y = 0f;
             if (delta.sqrMagnitude > _config.hearingRange * _config.hearingRange) return;
 
-            _blackboard.SetHeardClue(position);
+            _blackboard.SetHeardClue(position, _config.hearingClueLifetimeSeconds);
             if (suspicionBoost > 0f)
                 _blackboard.AddSuspicion(suspicionBoost);
         }
