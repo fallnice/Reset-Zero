@@ -130,6 +130,7 @@ namespace Role
             // 检查 Config
             if (config == null)
                 Debug.LogError("[CharacterRoot] 未分配 CharacterConfig，请在 Inspector 拖入", this);
+
         }
 
         /// <summary> 解析唯一输入源；显式引用优先，自动查找时检测多实现歧义 </summary>
@@ -186,6 +187,7 @@ namespace Role
 
         private void OnDisable()
         {
+            Enemy.EnemyRegistry.Unregister(this);
             UnsubscribeRuntimeEvents();
             UnregisterResponders();
         }

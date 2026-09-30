@@ -2,6 +2,7 @@ using UnityEngine;
 using Role;
 using Role.Controllers;
 using Role.Core;
+using Enemy.Influence;
 using Enemy.Navigation;
 using Enemy.States;
 
@@ -87,6 +88,19 @@ namespace Enemy
         public Vector3 AdjustedNavigationDirection => _localAvoidance != null
             ? _localAvoidance.AdjustedDirection
             : (_navigation != null ? _navigation.MoveDirection : Vector3.zero);
+        /// <summary> 当前场景影响图是否已构建并可供路径与战术采样。 </summary>
+        public bool IsInfluenceMapReady => _aiContext.InfluenceMap != null && _aiContext.InfluenceMap.IsReady;
+        /// <summary> 当前敌人所在格的动态影响成本；未就绪或越界时为 0。 </summary>
+        public int CurrentInfluenceCost
+        {
+            get
+            {
+                return _aiContext.InfluenceMap != null
+                    && _aiContext.InfluenceMap.TrySample(transform.position, out int cost)
+                        ? cost
+                        : 0;
+            }
+        }
 
         private void Awake()
         {
@@ -232,9 +246,11 @@ namespace Enemy
             _blackboard.TickTacticalCommit(Time.deltaTime);
             if (_aiContext.Grid == null)
             {
-                // 与项目其它模块保持一致仍用 FindObjectOfType；无网格时 Grid 恒为 null，Patrol 会自动退回 Idle。
+                // 场景级依赖仅在未缓存时查找；成功后不再产生每帧搜索开销。
                 _aiContext.Grid = Object.FindObjectOfType<EnemyNavigationGrid>();
             }
+            if (_aiContext.InfluenceMap == null)
+                _aiContext.InfluenceMap = Object.FindObjectOfType<EnemyInfluenceMap>();
 
             bool isDead = _character.Health != null && _character.Health.IsDead;
 
@@ -258,6 +274,9 @@ namespace Enemy
 
                 // 战术计时：撤退与包抄的超时兜底依赖它，必须在状态执行前刷新
                 _aiContext.TacticalElapsed = _blackboard.GetTacticalElapsed(config.tacticalCommitSeconds);
+                _aiContext.FlankElapsed = _blackboard.TacticalChoice == EnemyTacticalChoice.Flank
+                    ? _aiContext.FlankElapsed + Time.deltaTime
+                    : 0f;
                 _aiContext.RetreatElapsed = _blackboard.TacticalChoice == EnemyTacticalChoice.Retreat
                     ? _aiContext.RetreatElapsed + Time.deltaTime
                     : 0f;

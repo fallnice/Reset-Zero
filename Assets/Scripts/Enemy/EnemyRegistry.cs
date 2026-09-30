@@ -17,6 +17,13 @@ namespace Enemy
     {
         private static readonly List<CharacterRoot> Roots = new List<CharacterRoot>();
 
+        /// <summary> 每次进入运行期前清空静态注册表，兼容关闭 Domain Reload 的编辑器设置。 </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRuntimeState()
+        {
+            Roots.Clear();
+        }
+
         /// <summary> 当前注册的角色数量（调试用） </summary>
         public static int Count => Roots.Count;
 
@@ -34,6 +41,20 @@ namespace Enemy
             Roots.Remove(root);
         }
 
+        /// <summary> 按索引读取活跃角色，不暴露可变列表且不创建枚举器或数组。 </summary>
+        public static bool TryGetAt(int index, out CharacterRoot root)
+        {
+            root = null;
+            if (index < 0 || index >= Roots.Count) return false;
+
+            CharacterRoot candidate = Roots[index];
+            if (candidate == null || !candidate.isActiveAndEnabled || !candidate.gameObject.activeInHierarchy)
+                return false;
+
+            root = candidate;
+            return true;
+        }
+
         /// <summary>
         /// 向所有角色广播一次武器声。
         /// 战斗层还没有带位置的开火事件，只能这样近似；每个敌人的 EnemyHearing 会自行按距离过滤，
@@ -49,6 +70,7 @@ namespace Enemy
                     Roots.RemoveAt(i);
                     continue;
                 }
+                if (!root.isActiveAndEnabled || !root.gameObject.activeInHierarchy) continue;
                 root.Brain?.NotifyHeardWeaponNoise(sourcePosition);
             }
         }
@@ -78,6 +100,7 @@ namespace Enemy
                     Roots.RemoveAt(i);
                     continue;
                 }
+                if (!candidate.isActiveAndEnabled || !candidate.gameObject.activeInHierarchy) continue;
                 if (candidate == self || !candidate.IsPlayerControlled) continue;
                 if (candidate.Health != null && candidate.Health.IsDead) continue;
 

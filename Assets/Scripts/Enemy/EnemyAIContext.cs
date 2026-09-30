@@ -1,3 +1,4 @@
+using Enemy.Influence;
 using Enemy.Navigation;
 using Role;
 using UnityEngine;
@@ -19,6 +20,7 @@ namespace Enemy
         public EnemyAIBlackboard Blackboard;
         public EnemyConfig Config;
         public EnemyNavigationGrid Grid;
+        public EnemyInfluenceMap InfluenceMap;
         public EnemyUtilityEvaluator Tactical;
         public Vector3 HomePosition;
         public float DeltaTime;
@@ -30,8 +32,11 @@ namespace Enemy
         /// <summary> 撤退冷却剩余时间；跨状态保留，避免撤退一结束就立刻再撤 </summary>
         public float RetreatCooldownRemaining;
 
-        /// <summary> 当前战术已持续的秒数；用于包抄超时兜底 </summary>
+        /// <summary> 当前战术已持续的秒数；供决策诊断使用。 </summary>
         public float TacticalElapsed;
+
+        /// <summary> 从进入包抄开始累计的秒数，不受战术保持窗口重选影响。 </summary>
+        public float FlankElapsed;
 
         /// <summary>
         /// 从进入撤退开始累计的秒数。
@@ -77,6 +82,7 @@ namespace Enemy
             FlankCooldownRemaining = 0f;
             RetreatCooldownRemaining = 0f;
             TacticalElapsed = 0f;
+            FlankElapsed = 0f;
             RetreatElapsed = 0f;
             _hasPendingTransition = false;
             _pendingTransition = default;

@@ -110,7 +110,7 @@ function Test-ProjectOpenedByEditor {
 Write-Host '[0/3] Static check (no Unity required) ...'
 $staticScript = Join-Path $PSScriptRoot 'static_check.ps1'
 $staticLog = Join-Path $env:TEMP 'unity_static_audit.log'
-Remove-Item $staticLog -ErrorAction SilentlyContinue
+if (Test-Path $staticLog) { Remove-Item $staticLog -Force }
 
 & powershell -NoProfile -ExecutionPolicy Bypass -File $staticScript -Project $Project
 $staticExit = $LASTEXITCODE
@@ -149,7 +149,7 @@ if ($Unity) {
     # ---------- Step 1: Compile check ----------
     Write-Host '[1/3] Compile check (takes 1-2 min) ...'
     $compileLog = Join-Path $env:TEMP 'unity_compile_check.log'
-    Remove-Item $compileLog -ErrorAction SilentlyContinue
+    if (Test-Path $compileLog) { Remove-Item $compileLog -Force }
     $compileExit = Invoke-UnityBatchWithRetry -LogPath $compileLog
 
     $errors = @(Select-String -Path $compileLog -Pattern 'error CS' -ErrorAction SilentlyContinue)
@@ -172,7 +172,8 @@ if ($Unity) {
     Write-Host '[2/3] Scene audit ...'
     $auditLog = Join-Path $env:TEMP 'unity_scene_audit.log'
     $auditRunLog = Join-Path $env:TEMP 'unity_scene_audit_run.log'
-    Remove-Item $auditLog, $auditRunLog -ErrorAction SilentlyContinue
+    if (Test-Path $auditLog) { Remove-Item $auditLog -Force }
+    if (Test-Path $auditRunLog) { Remove-Item $auditRunLog -Force }
 
     $null = Invoke-UnityBatchWithRetry -LogPath $auditRunLog -ExecuteMethod 'EditorTools.SceneAudit.RunFromCommandLine'
 
@@ -193,7 +194,8 @@ if ($Unity) {
         Write-Host '[3/4] PlayMode smoke (headless, takes 2-4 min) ...'
         $pmLog = Join-Path $env:TEMP 'unity_playmode_audit.log'
         $pmRunLog = Join-Path $env:TEMP 'unity_playmode_run.log'
-        Remove-Item $pmLog, $pmRunLog -ErrorAction SilentlyContinue
+        if (Test-Path $pmLog) { Remove-Item $pmLog -Force }
+        if (Test-Path $pmRunLog) { Remove-Item $pmRunLog -Force }
 
         try {
             $null = Invoke-UnityBatch -LogPath $pmRunLog -ExecuteMethod 'EditorTools.PlayModeSmokeCheck.RunFromCommandLine' -NoQuit

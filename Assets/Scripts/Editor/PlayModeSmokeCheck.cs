@@ -605,6 +605,8 @@ namespace EditorTools
                 float avgNeighbors = s.Frames > 0 ? s.NeighborSum / (float)s.Frames : 0f;
                 sb.AppendLine("[INFO]   " + s.Brain.name
                     + " | 状态=" + s.Brain.CurrentState
+                    + " | 影响图=" + (s.Brain.IsInfluenceMapReady ? "Ready" : "Missing")
+                    + " | 当前影响=" + s.Brain.CurrentInfluenceCost
                     + " | 见过Chase=" + s.SawChase
                     + " | 位移=" + s.MovedDistance.ToString("F2") + "m"
                     + " | 起始距玩家=" + s.StartDistanceToPlayer.ToString("F2") + "m"

@@ -2,6 +2,7 @@
 using Combat;
 using Core;
 using Enemy;
+using Enemy.Influence;
 using Enemy.Navigation;
 using Role;
 using Role.Controllers;
@@ -461,8 +462,29 @@ namespace EditorTools
             if ((groundMask & obstacleMask) != 0)
                 return new CheckResult(false, "EnemyNavigationGrid 的 Ground/Obstacle Mask 重叠");
 
+            EnemyInfluenceMap influenceMap = grids[0].GetComponent<EnemyInfluenceMap>();
+            if (influenceMap == null)
+                return new CheckResult(false, "EnemyNavigationGrid 缺少 EnemyInfluenceMap，动态战术成本未启用");
+            if (!influenceMap.enabled || !influenceMap.gameObject.activeInHierarchy)
+                return new CheckResult(false, "EnemyInfluenceMap 未启用");
+            if (influenceMap.Configuration == null)
+                return new CheckResult(false, "EnemyInfluenceMap 未分配 EnemyInfluenceMapConfig");
+
+            EnemyInfluenceMapConfig influenceConfig = influenceMap.Configuration;
+            if (influenceConfig.updateInterval < 0.05f)
+                return new CheckResult(false, "Influence Map updateInterval 必须 >= 0.05");
+            if (influenceConfig.dangerRadius <= 0f || influenceConfig.dangerCost <= 0)
+                return new CheckResult(false, "Influence Map 玩家威胁半径和成本必须 > 0");
+            if (influenceConfig.congestionRadius <= 0f || influenceConfig.congestionCost <= 0)
+                return new CheckResult(false, "Influence Map 敌人拥挤半径和成本必须 > 0");
+            if (influenceConfig.maxNodeCost < influenceConfig.dangerCost
+                || influenceConfig.maxNodeCost < influenceConfig.congestionCost)
+            {
+                return new CheckResult(false, "Influence Map maxNodeCost 不得小于任一峰值成本");
+            }
+
             return new CheckResult(true,
-                $"A* 配置有效：1 个网格，{navigations.Length} 个 GridAStarNavigation");
+                $"A* + Influence Map 配置有效：1 个网格，{navigations.Length} 个导航组件");
         }
 
         /// <summary>

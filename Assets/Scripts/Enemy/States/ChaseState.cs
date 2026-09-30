@@ -83,7 +83,7 @@ namespace Enemy.States
                     }
 
                     // 超时或导航失败就放弃包抄，避免卡在绕后路上
-                    if (context.TacticalElapsed >= context.Config.flankTimeoutSeconds
+                    if (context.FlankElapsed >= context.Config.flankTimeoutSeconds
                         || HasNavigationFailed(context))
                     {
                         context.FlankCooldownRemaining = context.Config.flankCooldownSeconds;

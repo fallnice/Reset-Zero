@@ -193,9 +193,13 @@ namespace Enemy
 
             if (choice == EnemyTacticalChoice.Flank)
             {
-                context.Blackboard.SetTacticalDecision(choice, context.Blackboard.TacticalCommitRemaining,
-                    Vector3.zero, ComputeFlankPoint(context));
-                context.TacticalElapsed = 0f;
+                // 只在首次进入包抄时锁定目标点；保持期内不跟随目标漂移，也不重置独立超时计时。
+                if (context.Blackboard.FlankPoint == Vector3.zero)
+                {
+                    context.Blackboard.SetTacticalDecision(choice, context.Blackboard.TacticalCommitRemaining,
+                        Vector3.zero, ComputeFlankPoint(context));
+                    context.FlankElapsed = 0f;
+                }
             }
         }
 
@@ -229,7 +233,7 @@ namespace Enemy
             return point;
         }
 
-        /// <summary> 包抄点：目标侧前方（把「目标→自己」绕 Y 轴转 flankAngle）的一段距离 </summary>
+        /// <summary> 比较目标左右两侧的动态影响成本，选择更安全且较不拥挤的可走包抄点。 </summary>
         private Vector3 ComputeFlankPoint(EnemyAIContext context)
         {
             if (context.Character == null || context.Blackboard.Target == null)
@@ -242,9 +246,43 @@ namespace Enemy
                 toSelf = -target.forward;
             toSelf.Normalize();
 
-            Vector3 flankDirection = Quaternion.Euler(0f, _config.flankAngle, 0f) * toSelf;
             float distance = Mathf.Max(_config.attackRange, _config.flankDistance);
-            return target.position + flankDirection * distance;
+            Vector3 left = target.position
+                + Quaternion.Euler(0f, _config.flankAngle, 0f) * toSelf * distance;
+            Vector3 right = target.position
+                + Quaternion.Euler(0f, -_config.flankAngle, 0f) * toSelf * distance;
+
+            bool hasLeft = TryResolveCandidate(context, left, out Vector3 resolvedLeft, out int leftCost);
+            bool hasRight = TryResolveCandidate(context, right, out Vector3 resolvedRight, out int rightCost);
+            if (!hasLeft && !hasRight) return context.Character.transform.position;
+            if (!hasLeft) return resolvedRight;
+            if (!hasRight) return resolvedLeft;
+            if (leftCost != rightCost) return leftCost < rightCost ? resolvedLeft : resolvedRight;
+
+            // 成本相同时按实例稳定分流，避免同配置敌人全部固定选择同一侧。
+            return (context.Character.GetInstanceID() & 1) == 0 ? resolvedLeft : resolvedRight;
+        }
+
+        /// <summary> 将战术候选吸附到导航网格并读取 Influence 成本。 </summary>
+        private static bool TryResolveCandidate(
+            EnemyAIContext context,
+            Vector3 candidate,
+            out Vector3 resolved,
+            out int cost)
+        {
+            resolved = candidate;
+            cost = 0;
+            if (context.Grid == null || !context.Grid.EnsureBuilt())
+                return true;
+            if (!context.Grid.TryFindNearestWalkable(
+                    candidate, context.Grid.EndpointSearchRadius, out int nodeIndex))
+            {
+                return false;
+            }
+
+            resolved = context.Grid.GetNodePosition(nodeIndex);
+            cost = context.InfluenceMap != null ? context.InfluenceMap.GetCost(nodeIndex) : 0;
+            return true;
         }
     }
 }

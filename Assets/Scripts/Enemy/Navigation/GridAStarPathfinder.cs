@@ -1,3 +1,4 @@
+using Enemy.Influence;
 using UnityEngine;
 
 namespace Enemy.Navigation
@@ -37,7 +38,8 @@ namespace Enemy.Navigation
             int maxExpandedNodes,
             int[] outputPath,
             out int outputCount,
-            out EnemyNavigationFailure failure)
+            out EnemyNavigationFailure failure,
+            EnemyInfluenceMap influenceMap = null)
         {
             outputCount = 0;
             failure = EnemyNavigationFailure.None;
@@ -109,7 +111,9 @@ namespace Enemy.Navigation
                     if (_state[neighbor] == 2) continue;
 
                     int stepCost = dx != 0 && dz != 0 ? 14 : 10;
-                    int tentative = _gCost[current] + stepCost;
+                    int influenceCost = influenceMap != null ? influenceMap.GetCost(neighbor) : 0;
+                    // 动态代价只允许非负值，启发函数仍低估实际成本，保持 A* 的可采纳性。
+                    int tentative = _gCost[current] + stepCost + Mathf.Max(0, influenceCost);
                     if (_state[neighbor] != 1 || tentative < _gCost[neighbor])
                     {
                         _gCost[neighbor] = tentative;

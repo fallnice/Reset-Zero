@@ -1,3 +1,4 @@
+using Enemy.Influence;
 using UnityEngine;
 
 namespace Enemy.Navigation
@@ -13,6 +14,8 @@ namespace Enemy.Navigation
 
         private Transform _agent;
         private EnemyConfig _config;
+        private EnemyInfluenceMap _influenceMap;
+        private int _plannedInfluenceVersion = -1;
         private int[] _path;
         private int _pathCount;
         private int _waypointIndex;
@@ -45,7 +48,10 @@ namespace Enemy.Navigation
                 grid = FindObjectOfType<EnemyNavigationGrid>();
 
             if (grid != null && grid.EnsureBuilt())
+            {
                 _path = new int[grid.NodeCount];
+                _influenceMap = grid.GetComponent<EnemyInfluenceMap>();
+            }
 
             // 错开不同敌人的首轮重算时刻，避免同帧集中寻路。
             float phase = Mathf.Abs(GetInstanceID() % 100) * 0.001f;
@@ -78,7 +84,9 @@ namespace Enemy.Navigation
             float now = Time.time;
             bool destinationMoved = HorizontalSqrDistance(_destination, _plannedDestination)
                 >= _config.targetMoveThreshold * _config.targetMoveThreshold;
-            bool needsPath = _pathCount == 0 || destinationMoved
+            bool influenceChanged = _influenceMap != null
+                && _influenceMap.Version != _plannedInfluenceVersion;
+            bool needsPath = _pathCount == 0 || destinationMoved || influenceChanged
                 || Status == EnemyNavigationStatus.Failed || Status == EnemyNavigationStatus.Stuck;
 
             if (needsPath && now >= _nextRepathTime)
@@ -126,6 +134,7 @@ namespace Enemy.Navigation
         {
             _hasDestination = false;
             _stoppingDistanceOverride = -1f;
+            _plannedInfluenceVersion = -1;
             _pathCount = 0;
             _waypointIndex = 0;
             _moveDirection = Vector3.zero;
@@ -149,7 +158,8 @@ namespace Enemy.Navigation
                 _config.maxSearchNodes,
                 _path,
                 out _pathCount,
-                out EnemyNavigationFailure failure);
+                out EnemyNavigationFailure failure,
+                _influenceMap);
 
             if (!success)
             {
@@ -159,6 +169,7 @@ namespace Enemy.Navigation
             }
 
             _plannedDestination = _destination;
+            _plannedInfluenceVersion = _influenceMap != null ? _influenceMap.Version : -1;
             _waypointIndex = 0;
             _stuckSampleTimer = 0f;
             _noProgressTime = 0f;
