@@ -33,3 +33,6 @@ Assets/*
 !Assets/Scripts.meta
 !Assets/csc.rsp
 !Assets/csc.rsp.meta
+
+# ===== 提交用临时文件（git commit -F 的中文提交词载体，用完删除）=====
+_commit_msg.txt
