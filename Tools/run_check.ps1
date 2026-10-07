@@ -23,13 +23,19 @@
 #
 # NOTE: keep this file ASCII-only. PowerShell 5.1 decodes .ps1 with the ANSI
 # codepage; non-ASCII bytes in a BOM-less UTF-8 file get garbled.
+#
+# -IncludeTactics runs the tactics audit (Influence Map / group alert / hearing):
+# also a headless PlayMode run, but it actively manipulates actors (teleport,
+# kill, disable, fire a gun) to build the scenarios, so it is slower than the
+# generic smoke check.
 
 param(
     [string]$Project = "",
     [string]$UnityPath = "",
     [int]$TimeoutSeconds = 180,
     [switch]$Force,
-    [switch]$IncludePlayMode
+    [switch]$IncludePlayMode,
+    [switch]$IncludeTactics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,6 +139,7 @@ if ($Unity) { Write-Host "[AutoCheck] Unity: $Unity" }
 $compilePass = $null   # $null = skipped
 $auditPass = $null     # $null = skipped
 $playPass = $null      # $null = skipped (only runs with -IncludePlayMode)
+$tacticsPass = $null   # $null = skipped (only runs with -IncludeTactics)
 
 if ($Unity) {
     # Refuse to run while the editor has this project open: concurrent batchmode
@@ -212,6 +219,30 @@ if ($Unity) {
             $playPass = $false
         }
     }
+
+    # ---------- Step 4: Tactics audit (Influence Map / group alert / hearing) ----------
+    if ($IncludeTactics) {
+        Write-Host '[4/4] Tactics audit (headless, takes 2-4 min) ...'
+        $tcLog = Join-Path $env:TEMP 'unity_tactics_audit.log'
+        $tcRunLog = Join-Path $env:TEMP 'unity_tactics_run.log'
+        if (Test-Path $tcLog) { Remove-Item $tcLog -Force }
+        if (Test-Path $tcRunLog) { Remove-Item $tcRunLog -Force }
+
+        try {
+            $null = Invoke-UnityBatch -LogPath $tcRunLog -ExecuteMethod 'EditorTools.PlayModeTacticsCheck.RunFromCommandLine' -NoQuit
+        } catch {
+            Write-Host "[WARN] Tactics run did not finish cleanly: $($_.Exception.Message)"
+        }
+
+        if (Test-Path $tcLog) {
+            Get-Content $tcLog | ForEach-Object { Write-Host ("  " + $_) }
+            $tacticsPass = [bool](Select-String -Path $tcLog -Pattern 'TACTICS_AUDIT_RESULT: PASS' -Quiet)
+        } else {
+            Write-Host "[FAIL] Tactics result log not generated: $tcLog"
+            Write-Host "       Unity run log: $tcRunLog"
+            $tacticsPass = $false
+        }
+    }
 }
 
 # ---------- Summary ----------
@@ -223,10 +254,15 @@ if ($IncludePlayMode) {
     Write-Host ("[AutoCheck] PlayMode: " + $(if ($null -eq $playPass) { 'SKIPPED' } elseif ($playPass) { 'PASS' } else { 'FAIL' }))
 }
 
+if ($IncludeTactics) {
+    Write-Host ("[AutoCheck] Tactics : " + $(if ($null -eq $tacticsPass) { 'SKIPPED' } elseif ($tacticsPass) { 'PASS' } else { 'FAIL' }))
+}
+
 $overallPass = ($staticPass) -and
                ($null -eq $compilePass -or $compilePass) -and
                ($null -eq $auditPass -or $auditPass) -and
-               ($null -eq $playPass -or $playPass)
+               ($null -eq $playPass -or $playPass) -and
+               ($null -eq $tacticsPass -or $tacticsPass)
 
 if ($overallPass) {
     Write-Host 'AUTO CHECK: ALL PASS'
