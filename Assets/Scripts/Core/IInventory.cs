@@ -9,10 +9,13 @@ namespace Core
     /// </summary>
     public interface IInventory
     {
-        /// <summary>添加物品，返回是否成功</summary>
+        /// <summary>添加物品，返回是否成功。</summary>
         bool AddItem(int itemId, int count);
 
-        /// <summary>移除物品，返回是否成功</summary>
+        /// <summary>添加物品并返回明确失败原因。</summary>
+        bool TryAddItem(int itemId, int count, out InventoryOperationResult result);
+
+        /// <summary>移除物品，返回是否成功。</summary>
         bool RemoveItem(int itemId, int count);
 
         /// <summary>预检能否放入指定数量的物品（不实际修改背包）</summary>

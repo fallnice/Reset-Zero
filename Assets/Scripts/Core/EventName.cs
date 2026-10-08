@@ -9,13 +9,14 @@ namespace Core
     public static class EventName
     {
         // ===== 背包系统 =====
-        public const string Bag_ItemAdded    = "bag_item_added";
-        public const string Bag_ItemRemoved  = "bag_item_removed";
+        public const string Bag_ItemAdded    = "bag_item_added";    // (int itemId, int count)
+        public const string Bag_ItemRemoved  = "bag_item_removed";  // (int itemId, int count)
         public const string Bag_Changed      = "bag_changed";       // 背包任意变动后刷新 UI
+        public const string Pickup_Completed = "pickup_completed";  // (int itemId, int count)
 
         // ===== 制作系统 =====
-        public const string Craft_Success    = "craft_success";
-        public const string Craft_Fail       = "craft_fail";
+        public const string Craft_Success    = "craft_success";     // (int recipeId, int itemId, int count)
+        public const string Craft_Fail       = "craft_fail";        // (int recipeId, string reason)
 
         // ===== UI 面板 =====
         public const string UI_BagOpened     = "ui_bag_opened";

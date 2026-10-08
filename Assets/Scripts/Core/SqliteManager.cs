@@ -14,6 +14,9 @@ namespace Core
         private string _runtimeDbPath;
         private SqliteTransaction _currentTransaction;   // 当前活跃事务，DAO 写操作自动绑定
 
+        /// <summary> 数据库连接是否已成功打开，可供 DAO 与事务写操作使用。 </summary>
+        public bool IsReady => _connection != null && _connection.State == System.Data.ConnectionState.Open;
+
         private void Awake()
         {
             if (Instance != null)
@@ -100,14 +103,10 @@ namespace Core
         /// </summary>
         public void RunInTransaction(System.Action work)
         {
-            if (work == null) return;
-
-            if (_connection == null)
-            {
-                Debug.LogError("[SqliteManager] 数据库未初始化，事务降级为直接执行");
-                work();
-                return;
-            }
+            if (work == null)
+                throw new System.ArgumentNullException(nameof(work));
+            if (!IsReady)
+                throw new System.InvalidOperationException("[SqliteManager] 数据库未初始化，无法开启事务");
 
             // 嵌套：已在外层事务中，直接执行，由最外层决定提交/回滚
             if (_currentTransaction != null)
