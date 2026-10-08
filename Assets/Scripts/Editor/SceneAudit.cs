@@ -4,6 +4,8 @@ using Core;
 using Enemy;
 using Enemy.Influence;
 using Enemy.Navigation;
+using Interaction;
+using Loot;
 using Role;
 using Role.Controllers;
 using Role.Core;
@@ -223,6 +225,7 @@ namespace EditorTools
             RegisterChecker("CameraFollow 引用完整", CheckCameraFollow);
             RegisterChecker("角色输入与动画桥接", CheckCharacterPresentation);
             RegisterChecker("敌人 AI 组件完整", CheckEnemyAI);
+            RegisterChecker("敌人掉落配置", CheckEnemyLoot);
             RegisterChecker("A* 导航网格配置", CheckEnemyNavigationGrid);
         }
 
@@ -436,6 +439,59 @@ namespace EditorTools
 
             return issues.Count == 0
                 ? new CheckResult(true, $"{brains.Length} 个 EnemyBrain 组件与配置完整")
+                : new CheckResult(false, string.Join("；", issues));
+        }
+
+        /// <summary> 已启用掉落的敌人必须具备合法掉落表；自定义预制体必须可被交互检测器解析。 </summary>
+        private static CheckResult CheckEnemyLoot()
+        {
+            EnemyLootDrop[] drops = UnityEngine.Object.FindObjectsOfType<EnemyLootDrop>(true);
+            if (drops.Length == 0)
+                return new CheckResult(true, "场景未启用敌人掉落，跳过掉落配置检查");
+
+            var issues = new List<string>();
+            for (int i = 0; i < drops.Length; i++)
+            {
+                EnemyLootDrop drop = drops[i];
+                if (drop.GetComponentInParent<CharacterRoot>() == null)
+                    issues.Add($"{drop.name}: 层级中缺少 CharacterRoot");
+                if (drop.Table == null)
+                {
+                    issues.Add($"{drop.name}: LootTable 未赋值");
+                    continue;
+                }
+                if (!drop.Table.HasValidEntry())
+                    issues.Add($"{drop.name}: LootTable 没有合法条目");
+                if (drop.GroundMask.value == 0)
+                    issues.Add($"{drop.name}: 地面层掩码为空");
+
+                IReadOnlyList<LootEntry> entries = drop.Table.Entries;
+                for (int entryIndex = 0; entryIndex < entries.Count; entryIndex++)
+                {
+                    LootEntry entry = entries[entryIndex];
+                    if (entry == null || !entry.IsValid)
+                        issues.Add($"{drop.name}: LootTable 第 {entryIndex + 1} 项参数非法");
+                }
+
+                GameObject prefab = drop.PickupPrefab;
+                if (prefab == null) continue;
+
+                PickupItem pickup = prefab.GetComponent<PickupItem>();
+                Collider pickupCollider = prefab.GetComponent<Collider>();
+                if (pickup == null)
+                    issues.Add($"{drop.name}: 拾取预制体根节点缺少 PickupItem");
+                else if (!pickup.enabled)
+                    issues.Add($"{drop.name}: 拾取预制体 PickupItem 未启用");
+                if (pickupCollider == null)
+                    issues.Add($"{drop.name}: 拾取预制体根节点缺少 Collider");
+                else if (!pickupCollider.enabled)
+                    issues.Add($"{drop.name}: 拾取预制体 Collider 未启用");
+                if (!prefab.activeSelf)
+                    issues.Add($"{drop.name}: 拾取预制体根节点未激活");
+            }
+
+            return issues.Count == 0
+                ? new CheckResult(true, $"{drops.Length} 个 EnemyLootDrop 配置有效")
                 : new CheckResult(false, string.Join("；", issues));
         }
 

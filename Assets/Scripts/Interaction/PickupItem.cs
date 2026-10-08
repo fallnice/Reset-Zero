@@ -13,8 +13,22 @@ namespace Interaction
         [SerializeField] private int count = 1;
         [SerializeField] private string promptText = "按 E 拾取";
 
-        /// <summary> 物体启用时允许交互。 </summary>
-        public bool CanInteract => gameObject.activeInHierarchy;
+        /// <summary> 物体启用且配置有效时允许交互。 </summary>
+        public bool CanInteract => isActiveAndEnabled && itemId > 0 && count > 0;
+
+        /// <summary> 运行时注入物品与数量，供敌人掉落等动态生成流程使用。 </summary>
+        public bool Configure(int newItemId, int newCount)
+        {
+            if (newItemId <= 0 || newCount <= 0)
+            {
+                Debug.LogWarning($"[PickupItem] 运行时配置非法 ID:{newItemId} 数量:{newCount}", this);
+                return false;
+            }
+
+            itemId = newItemId;
+            count = newCount;
+            return true;
+        }
 
         /// <summary> 返回当前拾取物的交互提示。 </summary>
         public string GetPrompt()

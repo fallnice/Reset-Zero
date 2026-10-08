@@ -30,8 +30,14 @@ namespace Core
 
         // ===== 角色系统 =====
         public const string Character_StateChanged = "character_state_changed"; // (oldState, newState)
-        public const string Character_Died        = "character_died";
+        public const string Character_Died       = "character_died";
         public const string Character_Respawned  = "character_respawned";
+
+        // ===== 掉落系统 =====
+        // 参数: CharacterRoot victim, GameObject attacker, int spawnedCount
+        public const string Loot_Dropped = "loot_dropped";
+        // 参数: CharacterRoot victim, PickupItem pickup, int itemId, int count
+        public const string Loot_ItemSpawned = "loot_item_spawned";
 
         // ===== 交互系统 =====
         public const string Interaction_TargetChanged = "interaction_target_changed"; // (string prompt) 目标变化，null 表示无目标

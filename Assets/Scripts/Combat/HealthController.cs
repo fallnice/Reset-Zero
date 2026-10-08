@@ -17,14 +17,23 @@ namespace Combat
         public float CurrentHealth { get; private set; }
         public bool IsDead { get; private set; }
 
+        /// <summary> 当前已发生的死亡周期编号，供延迟订阅者补偿漏接事件。 </summary>
+        public uint DeathSequence { get; private set; }
+
+        /// <summary> 最近一次致死伤害上下文，仅在 IsDead 为 true 时有效。 </summary>
+        public DamageContext LastLethalContext { get; private set; }
+
         /// <summary> 受击回调：参数为剩余血量 </summary>
         public event Action<float> Damaged;
 
         /// <summary> 受击回调（带完整伤害上下文） </summary>
         public event Action<DamageContext> DamagedWithContext;
 
-        /// <summary> 死亡回调（血量首次归零触发一次） </summary>
+        /// <summary> 死亡回调（血量首次归零触发一次）。 </summary>
         public event Action Died;
+
+        /// <summary> 死亡回调（携带造成致死伤害的完整上下文）。 </summary>
+        public event Action<DamageContext> DiedWithContext;
 
         /// <summary> 生命重置回调（复活/新一轮测试） </summary>
         public event Action HealthReset;
@@ -49,7 +58,10 @@ namespace Combat
             if (CurrentHealth <= 0f)
             {
                 IsDead = true;
+                DeathSequence++;
+                LastLethalContext = context;
                 Died?.Invoke();
+                DiedWithContext?.Invoke(context);
             }
         }
 
@@ -64,6 +76,7 @@ namespace Combat
         public void ResetHealth()
         {
             IsDead = false;
+            LastLethalContext = default;
             CurrentHealth = maxHealth;
             HealthReset?.Invoke();
         }
