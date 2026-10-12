@@ -104,6 +104,70 @@ namespace Controller
             return true;
         }
 
+        /// <summary> 在同一事务中添加物品并执行额外持久化，供任务奖励等跨模块提交使用。 </summary>
+        public bool TryAddItemAtomic(
+            int itemId,
+            int count,
+            System.Action persistAdditionalChanges,
+            out InventoryOperationResult result)
+        {
+            result = InventoryOperationResult.InvalidArgument;
+            if (itemId <= 0 || count <= 0 || persistAdditionalChanges == null)
+            {
+                Debug.LogWarning($"[BagController] 原子添加参数非法 ID:{itemId} 数量:{count}");
+                return false;
+            }
+            if (!IsPersistenceReady())
+            {
+                result = InventoryOperationResult.NotInitialized;
+                Debug.LogWarning("[BagController] 数据库或背包未初始化，原子添加已取消");
+                return false;
+            }
+            if (SqliteManager.Instance.HasActiveTransaction)
+            {
+                result = InventoryOperationResult.PersistenceFailed;
+                Debug.LogWarning("[BagController] 原子添加不允许在外层事务中调用");
+                return false;
+            }
+
+            ItemInfo item = _itemDao.GetItemById(itemId);
+            if (item == null || item.MaxStack <= 0)
+            {
+                result = InventoryOperationResult.ItemNotFound;
+                Debug.LogWarning($"[BagController] 物品配置不存在或堆叠上限非法 ID:{itemId}");
+                return false;
+            }
+
+            List<BagSlotInfo> snapshot = CloneSlots();
+            if (!ApplyAddTo(snapshot, itemId, count, out _))
+            {
+                result = InventoryOperationResult.InsufficientSpace;
+                return false;
+            }
+
+            try
+            {
+                SqliteManager.Instance.RunInTransaction(() =>
+                {
+                    foreach (BagSlotInfo slot in snapshot)
+                        _bagDao.UpdateSlot(slot);
+                    persistAdditionalChanges();
+                });
+            }
+            catch (System.Exception exception)
+            {
+                result = InventoryOperationResult.PersistenceFailed;
+                Debug.LogWarning("[BagController] 原子添加写库失败，内存未改变。原因:" + exception.Message);
+                return false;
+            }
+
+            ApplySnapshotToLive(snapshot);
+            result = InventoryOperationResult.Success;
+            EventBus.Emit(EventName.Bag_ItemAdded, itemId, count);
+            EventBus.Emit(EventName.Bag_Changed);
+            return true;
+        }
+
         /// <summary>
         /// 原子移除物品：先在副本中预演，事务提交成功后才更新内存并发送领域事件。
         /// </summary>

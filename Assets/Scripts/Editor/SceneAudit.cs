@@ -6,7 +6,9 @@ using Enemy.Influence;
 using Enemy.Navigation;
 using Interaction;
 using Loot;
+using Model;
 using Role;
+using View;
 using Role.Controllers;
 using Role.Core;
 using Role.Input;
@@ -18,7 +20,6 @@ using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using View;
 
 namespace EditorTools
 {
@@ -226,6 +227,7 @@ namespace EditorTools
             RegisterChecker("角色输入与动画桥接", CheckCharacterPresentation);
             RegisterChecker("敌人 AI 组件完整", CheckEnemyAI);
             RegisterChecker("敌人掉落配置", CheckEnemyLoot);
+            RegisterChecker("任务系统配置", CheckQuestSystem);
             RegisterChecker("A* 导航网格配置", CheckEnemyNavigationGrid);
         }
 
@@ -492,6 +494,41 @@ namespace EditorTools
 
             return issues.Count == 0
                 ? new CheckResult(true, $"{drops.Length} 个 EnemyLootDrop 配置有效")
+                : new CheckResult(false, string.Join("；", issues));
+        }
+
+        /// <summary> 任务系统必须具备合法定义、唯一发布者、任务 HUD 和可交互碰撞体。 </summary>
+        private static CheckResult CheckQuestSystem()
+        {
+            GameRoot root = UnityEngine.Object.FindObjectOfType<GameRoot>(true);
+            if (root == null) return new CheckResult(false, "场景缺少 GameRoot，无法初始化任务系统");
+
+            var rootObject = new SerializedObject(root);
+            QuestDefinition definition = rootObject.FindProperty("questDefinition")?.objectReferenceValue
+                as QuestDefinition;
+            var issues = new List<string>();
+            if (definition == null)
+                issues.Add("GameRoot.questDefinition 未赋值");
+            else if (!definition.IsValid())
+                issues.Add($"任务定义 {definition.name} 参数非法");
+
+            QuestGiverInteractable[] givers =
+                UnityEngine.Object.FindObjectsOfType<QuestGiverInteractable>(true);
+            if (givers.Length != 1)
+                issues.Add($"首版单任务应有且仅有 1 个 QuestGiverInteractable，当前={givers.Length}");
+            else
+            {
+                Collider giverCollider = givers[0].GetComponent<Collider>();
+                if (giverCollider == null || !giverCollider.enabled)
+                    issues.Add($"{givers[0].name}: 根节点缺少已启用的 Collider");
+            }
+
+            QuestView[] views = UnityEngine.Object.FindObjectsOfType<QuestView>(true);
+            if (views.Length != 1)
+                issues.Add($"首版单任务应有且仅有 1 个 QuestView，当前={views.Length}");
+
+            return issues.Count == 0
+                ? new CheckResult(true, $"任务 {definition.QuestId} 定义、发布者和 HUD 配置有效")
                 : new CheckResult(false, string.Join("；", issues));
         }
 

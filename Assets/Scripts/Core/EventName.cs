@@ -19,6 +19,14 @@ namespace Core
         public const string Craft_Success    = "craft_success";     // (int recipeId, int itemId, int count)
         public const string Craft_Fail       = "craft_fail";        // (int recipeId, string reason)
 
+        // ===== 任务系统 =====
+        public const string Quest_Accepted = "quest_accepted"; // (string questId)
+        public const string Quest_Query = "quest_query";
+        // 参数: QuestDefinition definition, QuestState state, int[] progress
+        public const string Quest_Changed = "quest_changed";
+        // 参数: string questId, int rewardItemId, int rewardCount
+        public const string Quest_Completed = "quest_completed";
+
         // ===== UI 面板 =====
         public const string UI_BagOpened     = "ui_bag_opened";
         public const string UI_BagClosed     = "ui_bag_closed";

@@ -350,6 +350,12 @@ namespace Role
             Die();
         }
 
+        /// <summary> 发布携带致死来源的角色死亡事实，供任务等跨模块系统统计。 </summary>
+        private void HandleHealthDiedWithContext(DamageContext context)
+        {
+            EventBus.Emit(EventName.Character_Died, this, context);
+        }
+
         private void HandleHealthReset()
         {
             RestoreAfterHealthReset();
@@ -394,6 +400,7 @@ namespace Role
             if (health != null)
             {
                 health.Died += HandleHealthDied;
+                health.DiedWithContext += HandleHealthDiedWithContext;
                 health.HealthReset += HandleHealthReset;
             }
 
@@ -421,6 +428,7 @@ namespace Role
                 if (health != null)
                 {
                     health.Died -= HandleHealthDied;
+                    health.DiedWithContext -= HandleHealthDiedWithContext;
                     health.HealthReset -= HandleHealthReset;
                 }
                 _runtimeEventsSubscribed = false;

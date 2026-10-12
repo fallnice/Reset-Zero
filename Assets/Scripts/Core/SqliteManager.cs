@@ -95,6 +95,9 @@ namespace Core
             return cmd.ExecuteReader();
         }
 
+        /// <summary> 当前是否已经处于事务中。 </summary>
+        public bool HasActiveTransaction => _currentTransaction != null;
+
         /// <summary>
         /// 作用域事务：work 内的写操作自动绑定当前事务。
         /// 正常执行则提交；抛异常则回滚并重新抛出；无论成功失败都会在 finally 中释放并清空事务，

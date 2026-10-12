@@ -1,3 +1,4 @@
+using System;
 using Model;
 
 namespace Core
@@ -26,5 +27,9 @@ namespace Core
 
         /// <summary>原子制作：扣材料 + 加成品，内存与数据库一致提交；失败时两者都不变</summary>
         bool TryCraft(RecipeInfo recipe, out string failReason);
+
+        /// <summary>在同一事务中添加物品并执行额外持久化；任一步失败时全部回滚。</summary>
+        bool TryAddItemAtomic(int itemId, int count, Action persistAdditionalChanges,
+            out InventoryOperationResult result);
     }
 }

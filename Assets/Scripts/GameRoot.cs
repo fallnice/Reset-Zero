@@ -1,6 +1,10 @@
 using Core;
 using Controller;
+using DAO;
+using Interaction;
+using Model;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using View;
 using Role.Core;
 using Role.Input;
@@ -14,7 +18,11 @@ public class GameRoot : MonoBehaviour
     public IInventory Inventory => BagController;  // 对外暴露接口，联机时可替换实现
     public CraftController CraftController { get; private set; }
     public BonusController BonusController { get; private set; }
+    public QuestController QuestController { get; private set; }
     public UIController UIController { get; private set; }
+
+    [Header("任务系统")]
+    [SerializeField] private QuestDefinition questDefinition;
 
     // UI 输入提供者——角色可能在 GameRoot 之后才初始化，延迟获取后缓存
     private IUiInputProvider _uiInput;
@@ -70,6 +78,17 @@ public class GameRoot : MonoBehaviour
 
         BonusController = new BonusController();
         BonusController.Init(BagController);
+
+        QuestController = new QuestController(BagController, new QuestDao());
+        if (questDefinition == null)
+        {
+            Debug.LogWarning("[GameRoot] 未配置 QuestDefinition，任务系统不可用");
+        }
+        else if (QuestController.Initialize(questDefinition))
+        {
+            SceneManager.sceneLoaded += HandleSceneLoaded;
+            InitializeQuestGivers();
+        }
 
         // 3. 查找并注册 UI 面板（场景中可能缺失，逐个判空降级）
         BagView bagView = FindObjectOfType<BagView>(true);
@@ -189,8 +208,43 @@ public class GameRoot : MonoBehaviour
         BonusController.SetCombatStats(_playerCharacter.Context.CombatStats);
     }
 
+    /// <summary> 新场景加载后为其中的任务发布者注入持久化任务控制器。 </summary>
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        InitializeQuestGivers();
+    }
+
+    /// <summary> 查找所有已加载场景中的任务发布者并注入控制器。 </summary>
+    private void InitializeQuestGivers()
+    {
+        if (QuestController == null) return;
+        QuestGiverInteractable[] questGivers = FindObjectsOfType<QuestGiverInteractable>(true);
+        if (questGivers.Length == 0)
+        {
+            Debug.LogWarning("[GameRoot] 场景中缺少 QuestGiverInteractable，任务无法接取或交付");
+            return;
+        }
+        for (int i = 0; i < questGivers.Length; i++)
+            questGivers[i].Initialize(QuestController);
+    }
+
+    private void OnDestroy()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        QuestController?.Dispose();
+        if (Instance == this) Instance = null;
+    }
+
     private void OnApplicationQuit()
     {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        QuestController?.Dispose();
         Instance = null;
+    }
+
+    private void OnValidate()
+    {
+        if (questDefinition == null)
+            Debug.LogWarning("[GameRoot] QuestDefinition 未配置", this);
     }
 }
