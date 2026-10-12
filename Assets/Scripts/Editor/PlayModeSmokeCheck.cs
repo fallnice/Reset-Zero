@@ -3,8 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Combat;
+using Core;
+using Dao;
 using Enemy;
 using Enemy.Navigation;
+using Interaction;
+using Loot;
+using Model;
 using Role;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -123,6 +128,15 @@ namespace EditorTools
         private static float _cancelLastAttackTry;
         private static string _cancelResult;
 
+        // ── 死亡掉落与拾取（10-08 批次：击杀 → 掉落 → 拾取 → 入包） ──
+        private static int _lootStage;          // 0 统计掉落 1 交互拾取 2 校验背包
+        private static float _lootStageStart;
+        private static int _lootItemId = -1;
+        private static int _pickupCount;
+        private static int _bagBefore = -1;
+        private static int _bagAfter = -1;
+        private static string _craftResult;      // 制造链（配方来自数据库 CraftMain / CraftSecond）
+
         static PlayModeSmokeCheck()
         {
             // 域重载后（进入 PlayMode 的那一刻）由 [InitializeOnLoad] 触发，把流程续上
@@ -238,6 +252,10 @@ namespace EditorTools
                 case 4:
                     TickCancelTest(now);
                     break;
+
+                case 5:
+                    TickLoot(now);
+                    break;
             }
         }
 
@@ -309,7 +327,7 @@ namespace EditorTools
                     {
                         _cancelResult = "SKIP 目标在 " + CancelWaitAttackSeconds.ToString("F0")
                             + "s 内没有起手，本轮未触发取消测试";
-                        Finish(null);
+                        SetPhase(5, now);
                     }
                     break;
 
@@ -321,9 +339,124 @@ namespace EditorTools
                           + " 血（迟到的伤害被补上了）"
                         : "PASS 起手后击杀攻击者，观察 " + CancelObserveSeconds.ToString("F1")
                           + "s 玩家血量未再变化（本次伤害已取消）";
+                    SetPhase(5, now);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 掉落与拾取：取消测试阶段已经把敌人都击杀，这里统计生成的拾取物、
+        /// 模拟玩家交互拾取（等价于按下交互键），再核对背包数量是否增加。
+        /// </summary>
+        private static void TickLoot(double now)
+        {
+            switch (_lootStage)
+            {
+                case 0:
+                    PickupItem[] spawn = UnityEngine.Object.FindObjectsOfType<PickupItem>();
+                    _pickupCount = spawn != null ? spawn.Length : 0;
+                    _lootItemId = ResolveLootItemId();
+                    IInventory bag = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
+                    if (_lootItemId > 0 && bag != null)
+                        _bagBefore = bag.GetItemTotalCount(_lootItemId);
+                    _lootStageStart = (float)now;
+                    _lootStage = 1;
+                    break;
+
+                case 1:
+                    if (now - _lootStageStart < 0.6f) break;
+                    if (_player != null)
+                    {
+                        PickupItem[] items = UnityEngine.Object.FindObjectsOfType<PickupItem>();
+                        for (int i = 0; i < items.Length; i++)
+                        {
+                            if (items[i] == null || !items[i].CanInteract) continue;
+                            items[i].OnInteract(_player.gameObject);
+                            break;
+                        }
+                    }
+                    _lootStageStart = (float)now;
+                    _lootStage = 2;
+                    break;
+
+                case 2:
+                    if (now - _lootStageStart < 0.8f) break;
+                    IInventory inventory = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
+                    if (_lootItemId > 0 && inventory != null)
+                        _bagAfter = inventory.GetItemTotalCount(_lootItemId);
+                    _lootStageStart = (float)now;
+                    _lootStage = 3;
+                    break;
+
+                case 3:
+                    if (now - _lootStageStart < 0.3f) break;
+                    TryCraftOnce();
                     Finish(null);
                     break;
             }
+        }
+
+        /// <summary>
+        /// 制造链：配方来自数据库（CraftMain + CraftSecond），不是 ScriptableObject 资产。
+        /// 材料不够时直接补齐（测试布置），再走 TryCraft，核对成品增量。
+        /// </summary>
+        private static void TryCraftOnce()
+        {
+            IInventory bag = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
+            if (bag == null)
+            {
+                _craftResult = "SKIP 拿不到背包实例";
+                return;
+            }
+
+            try
+            {
+                Dictionary<int, RecipeInfo> recipes = new RecipeDao().GetAllRecipes();
+                if (recipes == null || recipes.Count == 0)
+                {
+                    _craftResult = "SKIP 配方表为空（CraftMain / CraftSecond 没有数据）";
+                    return;
+                }
+
+                foreach (KeyValuePair<int, RecipeInfo> pair in recipes)
+                {
+                    RecipeInfo recipe = pair.Value;
+                    if (recipe == null || recipe.Materials == null || recipe.Materials.Count == 0) continue;
+
+                    foreach (KeyValuePair<int, int> material in recipe.Materials)
+                    {
+                        int have = bag.GetItemTotalCount(material.Key);
+                        if (have < material.Value) bag.AddItem(material.Key, material.Value - have);
+                    }
+
+                    int before = bag.GetItemTotalCount(recipe.ResultItemId);
+                    bool ok = bag.TryCraft(recipe, out string reason);
+                    int after = bag.GetItemTotalCount(recipe.ResultItemId);
+
+                    _craftResult = ok
+                        ? "PASS 配方" + recipe.RecipeId + "：成品 " + recipe.ResultItemId
+                          + " " + before + " → " + after + "（目标 +" + recipe.ResultCount + "，材料已扣除）"
+                        : "FAIL 配方" + recipe.RecipeId + " 制造失败：" + reason;
+                    return;
+                }
+
+                _craftResult = "SKIP 配方表里没有带材料的配方";
+            }
+            catch (Exception e)
+            {
+                _craftResult = "SKIP 读取配方失败：" + e.Message;
+            }
+        }
+
+        /// <summary> 从工程里的 LootTable 取掉落物品 ID（用于核对背包增量）。 </summary>
+        private static int ResolveLootItemId()
+        {
+            string[] guids = AssetDatabase.FindAssets("t:LootTable");
+            if (guids == null || guids.Length == 0) return -1;
+            LootTable table = AssetDatabase.LoadAssetAtPath<LootTable>(
+                AssetDatabase.GUIDToAssetPath(guids[0]));
+            if (table == null || table.Entries == null || table.Entries.Count == 0) return -1;
+            return table.Entries[0].ItemId;
         }
 
         private static void SetPhase(int phase, double now)
@@ -671,6 +804,42 @@ namespace EditorTools
                 if (cancelOk) pass++;
                 else if (!_cancelResult.StartsWith("SKIP")) fail++;
                 sb.AppendLine((cancelOk ? "[PASS] " : "[INFO] ") + "前摇取消: " + _cancelResult);
+            }
+
+            // 10. 死亡掉落与拾取（10-08 批次：掉落 → 拾取 → 入包的完整链路）
+            if (_pickupCount > 0)
+            {
+                sb.AppendLine("[PASS] 敌人死亡掉落: 生成 " + _pickupCount + " 个拾取物");
+                pass++;
+
+                if (_bagBefore >= 0 && _bagAfter >= 0)
+                {
+                    bool picked = _bagAfter > _bagBefore;
+                    sb.AppendLine((picked ? "[PASS] " : "[FAIL] ")
+                        + "拾取入包: 物品 " + _lootItemId + " 数量 "
+                        + _bagBefore + " → " + _bagAfter);
+                    if (picked) pass++; else fail++;
+                }
+                else
+                {
+                    sb.AppendLine("[INFO] 拾取入包: 拿不到背包或掉落表，未核对数量（库存="
+                        + (GameRoot.Instance != null && GameRoot.Instance.Inventory != null)
+                        + "，物品ID=" + _lootItemId + "）");
+                }
+            }
+            else
+            {
+                sb.AppendLine("[INFO] 敌人死亡掉落: 本轮没有生成拾取物"
+                    + "（若地面层射线没找到落点就不会掉落，检查 EnemyLootDrop.groundMask）");
+            }
+
+            // 11. 制造链（配方数据来自数据库 CraftMain / CraftSecond）
+            if (!string.IsNullOrEmpty(_craftResult))
+            {
+                bool craftOk = _craftResult.StartsWith("PASS");
+                if (craftOk) pass++;
+                else if (!_craftResult.StartsWith("SKIP")) fail++;
+                sb.AppendLine((craftOk ? "[PASS] " : "[INFO] ") + "制造链: " + _craftResult);
             }
 
             sb.AppendLine();
