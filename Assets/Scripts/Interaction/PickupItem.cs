@@ -61,7 +61,7 @@ namespace Interaction
             if (inventory.TryAddItem(itemId, count, out InventoryOperationResult result))
             {
                 EventBus.Emit(EventName.Interaction_Performed, this);
-                EventBus.Emit(EventName.Pickup_Completed, itemId, count);
+                EventBus.Emit(EventName.Pickup_Completed, this, itemId, count);
                 Destroy(gameObject);
                 return;
             }

@@ -12,7 +12,8 @@ namespace Core
         public const string Bag_ItemAdded    = "bag_item_added";    // (int itemId, int count)
         public const string Bag_ItemRemoved  = "bag_item_removed";  // (int itemId, int count)
         public const string Bag_Changed      = "bag_changed";       // 背包任意变动后刷新 UI
-        public const string Pickup_Completed = "pickup_completed";  // (int itemId, int count)
+        // 参数: PickupItem pickup, int itemId, int count
+        public const string Pickup_Completed = "pickup_completed";
 
         // ===== 制作系统 =====
         public const string Craft_Success    = "craft_success";     // (int recipeId, int itemId, int count)

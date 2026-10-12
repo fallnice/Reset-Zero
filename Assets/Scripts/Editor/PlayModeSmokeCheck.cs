@@ -52,6 +52,7 @@ namespace EditorTools
         private const string KeyPhaseStart = "PlayModeSmokeCheck.PhaseStart";
         private const string KeyScene = "PlayModeSmokeCheck.Scene";
         private const string KeyResult = "PlayModeSmokeCheck.Result";
+        private const string KeyBagSnapshot = "PlayModeSmokeCheck.BagSnapshot";
 
         private const string DefaultLogFileName = "unity_playmode_audit.log";
         private const string SceneEnvVar = "PLAYMODE_AUDIT_SCENE";
@@ -90,6 +91,7 @@ namespace EditorTools
             public EnemyNavigationFailure LastNavFailure;       // 最近一次导航失败原因
             public float MoveDirSum;                            // 输出方向模长累计（0=一直在原地磨）
             public float EndDistanceToPlayer = -1f;             // 追击阶段结束时与玩家的距离
+            public bool KilledBySmokeCheck;                     // 本轮是否由冒烟清场/取消流程击杀
         }
 
         private static string _resultPath;
@@ -129,12 +131,29 @@ namespace EditorTools
         private static string _cancelResult;
 
         // ── 死亡掉落与拾取（10-08 批次：击杀 → 掉落 → 拾取 → 入包） ──
-        private static int _lootStage;          // 0 统计掉落 1 交互拾取 2 校验背包
+        private static int _lootStage;          // 0 选择本轮掉落 1 交互拾取 2 校验背包 3 制造
         private static float _lootStageStart;
         private static int _lootItemId = -1;
-        private static int _pickupCount;
+        private static int _lootItemCount;
         private static int _bagBefore = -1;
         private static int _bagAfter = -1;
+        private static int _pickupCompletedCount;
+        private static PickupItem _selectedLootPickup;
+        private static RecipeInfo _selectedLootRecipe;
+        private static EventBus.SubscriptionToken _lootDroppedToken;
+        private static EventBus.SubscriptionToken _lootSpawnToken;
+        private static EventBus.SubscriptionToken _pickupCompletedToken;
+        private static readonly HashSet<CharacterRoot> _diedLootVictims = new HashSet<CharacterRoot>();
+        private static readonly List<CharacterRoot> _pendingLootVictims = new List<CharacterRoot>();
+        private static readonly List<PickupItem> _pendingLootPickups = new List<PickupItem>();
+        private static readonly List<PickupItem> _spawnedLootPickups = new List<PickupItem>();
+        private static readonly List<BagSlotInfo> _bagSnapshot = new List<BagSlotInfo>();
+        private static bool _bagSnapshotCaptured;
+        private static bool _bagSnapshotRestored;
+        private static bool _bagSnapshotRecoveredAfterReload;
+        private static bool _bagSnapshotCorrupted;
+        private static float _snapshotRestoreWaitStart;
+        private static string _lootResult;
         private static string _craftResult;      // 制造链（配方来自数据库 CraftMain / CraftSecond）
 
         static PlayModeSmokeCheck()
@@ -146,9 +165,11 @@ namespace EditorTools
             _startTime = SessionState.GetFloat(KeyStart, 0f);
             _phaseStart = SessionState.GetFloat(KeyPhaseStart, 0f);
             _phase = SessionState.GetInt(KeyPhase, 0);
+            LoadBagSnapshotFromSession();
             _subscribed = true;
             Application.logMessageReceived += HandleLog;
             EditorApplication.update += Tick;
+            SubscribeLootEvents();
         }
 
         /// <summary>
@@ -180,6 +201,8 @@ namespace EditorTools
             SessionState.SetFloat(KeyPhaseStart, _startTime);
             SessionState.SetInt(KeyPhase, 0);
             SessionState.SetBool(KeyRunning, true);
+            ResetLootState();
+            SubscribeLootEvents();
 
             if (!_subscribed)
             {
@@ -198,6 +221,92 @@ namespace EditorTools
             if (_errors.Count < 20) _errors.Add(type + ": " + condition);
         }
 
+        /// <summary> 清空本轮掉落、拾取和库存恢复状态。 </summary>
+        private static void ResetLootState()
+        {
+            _lootStage = 0;
+            _lootItemId = -1;
+            _lootItemCount = 0;
+            _bagBefore = -1;
+            _bagAfter = -1;
+            _pickupCompletedCount = 0;
+            _selectedLootPickup = null;
+            _selectedLootRecipe = null;
+            _diedLootVictims.Clear();
+            _pendingLootVictims.Clear();
+            _pendingLootPickups.Clear();
+            _spawnedLootPickups.Clear();
+            _bagSnapshot.Clear();
+            _bagSnapshotCaptured = false;
+            _bagSnapshotRestored = false;
+            _bagSnapshotRecoveredAfterReload = false;
+            _bagSnapshotCorrupted = false;
+            _snapshotRestoreWaitStart = 0f;
+            SessionState.EraseString(KeyBagSnapshot);
+            _lootResult = null;
+            _craftResult = null;
+        }
+
+        /// <summary> 订阅本轮掉落生成与拾取完成事件，只接受 EnemyLootDrop 产生的实例。 </summary>
+        private static void SubscribeLootEvents()
+        {
+            _lootDroppedToken?.Dispose();
+            _lootSpawnToken?.Dispose();
+            _pickupCompletedToken?.Dispose();
+            _lootDroppedToken = EventBus.Subscribe(EventName.Loot_Dropped, HandleLootDropped);
+            _lootSpawnToken = EventBus.Subscribe(EventName.Loot_ItemSpawned, HandleLootItemSpawned);
+            _pickupCompletedToken = EventBus.Subscribe(EventName.Pickup_Completed, HandlePickupCompleted);
+        }
+
+        /// <summary> 记录本轮由冒烟击杀阶段触发掉落结算的受害角色。 </summary>
+        private static void HandleLootDropped(object[] args)
+        {
+            if (args == null || args.Length < 3 || !(args[0] is CharacterRoot victim) || victim == null) return;
+            for (int i = 0; i < _samples.Count; i++)
+            {
+                if (_samples[i].Root == victim && _samples[i].KilledBySmokeCheck)
+                {
+                    _diedLootVictims.Add(victim);
+                    for (int pendingIndex = _pendingLootVictims.Count - 1; pendingIndex >= 0; pendingIndex--)
+                    {
+                        if (_pendingLootVictims[pendingIndex] != victim) continue;
+                        PickupItem pickup = _pendingLootPickups[pendingIndex];
+                        if (pickup != null && !_spawnedLootPickups.Contains(pickup))
+                            _spawnedLootPickups.Add(pickup);
+                        _pendingLootVictims.RemoveAt(pendingIndex);
+                        _pendingLootPickups.RemoveAt(pendingIndex);
+                    }
+                    return;
+                }
+            }
+        }
+
+        /// <summary> 仅记录已确认受害角色在本轮死亡链实际生成的拾取实例。 </summary>
+        private static void HandleLootItemSpawned(object[] args)
+        {
+            if (args == null || args.Length < 4 || !(args[0] is CharacterRoot victim)
+                || !(args[1] is PickupItem pickup) || pickup == null)
+                return;
+            if (_diedLootVictims.Contains(victim))
+            {
+                if (!_spawnedLootPickups.Contains(pickup))
+                    _spawnedLootPickups.Add(pickup);
+                return;
+            }
+            _pendingLootVictims.Add(victim);
+            _pendingLootPickups.Add(pickup);
+        }
+
+        /// <summary> 仅统计当前选中掉落物对应的拾取完成事件。 </summary>
+        private static void HandlePickupCompleted(object[] args)
+        {
+            if (args == null || args.Length < 3 || !(args[0] is PickupItem pickup)
+                || !(args[1] is int itemId) || !(args[2] is int count))
+                return;
+            if (pickup == _selectedLootPickup && itemId == _lootItemId && count == _lootItemCount)
+                _pickupCompletedCount++;
+        }
+
         // ── 状态机（EditorApplication.update 在编辑态与运行态都会触发） ──────────
 
         private static void Tick()
@@ -210,6 +319,12 @@ namespace EditorTools
 
             if (now - _startTime > MaxTotalSeconds)
             {
+                // 库存已变更时优先等待依赖恢复，不能让总超时绕过存档回滚。
+                if (_bagSnapshotRecoveredAfterReload && !_bagSnapshotCorrupted)
+                {
+                    TickLoot(now);
+                    return;
+                }
                 Finish("总时长超过 " + MaxTotalSeconds.ToString("F0") + " 秒，强制收尾（结果可能不完整）");
                 return;
             }
@@ -344,119 +459,379 @@ namespace EditorTools
             }
         }
 
-        /// <summary>
-        /// 掉落与拾取：取消测试阶段已经把敌人都击杀，这里统计生成的拾取物、
-        /// 模拟玩家交互拾取（等价于按下交互键），再核对背包数量是否增加。
-        /// </summary>
+        /// <summary> 只验证本轮死亡生成的掉落，并要求该材料参与一次精确制造。 </summary>
         private static void TickLoot(double now)
         {
+            if (_bagSnapshotCorrupted)
+            {
+                FailLootCheck("跨域库存快照损坏，无法安全恢复测试存档");
+                Finish(null);
+                return;
+            }
+            if (_bagSnapshotRecoveredAfterReload)
+            {
+                if (_snapshotRestoreWaitStart <= 0f)
+                    _snapshotRestoreWaitStart = (float)now;
+                bool databaseReady = SqliteManager.Instance != null && SqliteManager.Instance.IsReady;
+                if (!databaseReady && now - _snapshotRestoreWaitStart < 10f) return;
+
+                FailLootCheck(databaseReady
+                    ? "库存变更期间发生域重载，运行态关联已丢失"
+                    : "域重载后等待数据库恢复超时");
+                if (databaseReady) RestoreBagSnapshot();
+                Finish(null);
+                return;
+            }
+
             switch (_lootStage)
             {
                 case 0:
-                    PickupItem[] spawn = UnityEngine.Object.FindObjectsOfType<PickupItem>();
-                    _pickupCount = spawn != null ? spawn.Length : 0;
-                    _lootItemId = ResolveLootItemId();
-                    IInventory bag = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
-                    if (_lootItemId > 0 && bag != null)
-                        _bagBefore = bag.GetItemTotalCount(_lootItemId);
+                    if (!TryPrepareLootCheck(out string prepareReason))
+                    {
+                        FailLootCheck(prepareReason);
+                        Finish(null);
+                        break;
+                    }
+                    _selectedLootPickup.OnInteract(_player.gameObject);
                     _lootStageStart = (float)now;
                     _lootStage = 1;
                     break;
 
                 case 1:
-                    if (now - _lootStageStart < 0.6f) break;
-                    if (_player != null)
-                    {
-                        PickupItem[] items = UnityEngine.Object.FindObjectsOfType<PickupItem>();
-                        for (int i = 0; i < items.Length; i++)
-                        {
-                            if (items[i] == null || !items[i].CanInteract) continue;
-                            items[i].OnInteract(_player.gameObject);
-                            break;
-                        }
-                    }
-                    _lootStageStart = (float)now;
-                    _lootStage = 2;
-                    break;
-
-                case 2:
                     if (now - _lootStageStart < 0.8f) break;
-                    IInventory inventory = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
-                    if (_lootItemId > 0 && inventory != null)
-                        _bagAfter = inventory.GetItemTotalCount(_lootItemId);
-                    _lootStageStart = (float)now;
-                    _lootStage = 3;
-                    break;
-
-                case 3:
-                    if (now - _lootStageStart < 0.3f) break;
-                    TryCraftOnce();
+                    ValidatePickupAndCraft();
                     Finish(null);
                     break;
             }
         }
 
-        /// <summary>
-        /// 制造链：配方来自数据库（CraftMain + CraftSecond），不是 ScriptableObject 资产。
-        /// 材料不够时直接补齐（测试布置），再走 TryCraft，核对成品增量。
-        /// </summary>
-        private static void TryCraftOnce()
+        /// <summary> 选择本轮生成且能参与现有配方的拾取物，并记录拾取前状态。 </summary>
+        private static bool TryPrepareLootCheck(out string reason)
         {
-            IInventory bag = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
-            if (bag == null)
+            reason = null;
+            IInventory inventory = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
+            if (_player == null || inventory == null || SqliteManager.Instance == null
+                || !SqliteManager.Instance.IsReady)
             {
-                _craftResult = "SKIP 拿不到背包实例";
+                reason = "玩家、背包或数据库未就绪";
+                return false;
+            }
+            if (!TrySelectCraftableLoot(inventory, out _selectedLootPickup, out _selectedLootRecipe))
+            {
+                reason = "本轮死亡未生成可用于现有配方的掉落物，或容量不足以完成制造";
+                return false;
+            }
+
+            _lootItemId = ReadPickupInt(_selectedLootPickup, "itemId");
+            _lootItemCount = ReadPickupInt(_selectedLootPickup, "count");
+            if (_lootItemId <= 0 || _lootItemCount <= 0)
+            {
+                reason = "本轮掉落物配置非法";
+                return false;
+            }
+
+            CaptureBagSnapshot(inventory);
+            _bagBefore = inventory.GetItemTotalCount(_lootItemId);
+            _craftResult = "待验证配方 " + _selectedLootRecipe.RecipeId;
+            return true;
+        }
+
+        /// <summary> 精确验证拾取结果、材料消耗和成品增量。 </summary>
+        private static void ValidatePickupAndCraft()
+        {
+            IInventory inventory = GameRoot.Instance != null ? GameRoot.Instance.Inventory : null;
+            _bagAfter = inventory != null ? inventory.GetItemTotalCount(_lootItemId) : -1;
+            bool destroyed = _selectedLootPickup == null;
+            bool exactIncrease = _bagBefore >= 0 && _bagAfter - _bagBefore == _lootItemCount;
+            if (!destroyed || !exactIncrease || _pickupCompletedCount != 1)
+            {
+                FailLootCheck("拾取结果不精确 destroyed=" + destroyed + " before=" + _bagBefore
+                    + " after=" + _bagAfter + " expected=" + _lootItemCount
+                    + " eventCount=" + _pickupCompletedCount);
+                RestoreBagSnapshot();
                 return;
             }
 
-            try
+            _craftResult = TryCraftUsingLoot(inventory, _lootItemId);
+            _lootResult = _craftResult.StartsWith("PASS", StringComparison.Ordinal)
+                ? "PASS itemId=" + _lootItemId + " 入包=" + _lootItemCount + " eventCount=1"
+                : "FAIL " + _craftResult;
+            RestoreBagSnapshot();
+        }
+
+        /// <summary> 从本轮生成实例中选择至少有一个配方会消耗的掉落物。 </summary>
+        private static bool TrySelectCraftableLoot(
+            IInventory inventory,
+            out PickupItem selectedPickup,
+            out RecipeInfo selectedRecipe)
+        {
+            selectedPickup = null;
+            selectedRecipe = null;
+            Dictionary<int, RecipeInfo> recipes = new RecipeDao().GetAllRecipes();
+            for (int pickupIndex = 0; pickupIndex < _spawnedLootPickups.Count; pickupIndex++)
             {
-                Dictionary<int, RecipeInfo> recipes = new RecipeDao().GetAllRecipes();
-                if (recipes == null || recipes.Count == 0)
-                {
-                    _craftResult = "SKIP 配方表为空（CraftMain / CraftSecond 没有数据）";
-                    return;
-                }
+                PickupItem pickup = _spawnedLootPickups[pickupIndex];
+                if (pickup == null || !pickup.CanInteract) continue;
+                int itemId = ReadPickupInt(pickup, "itemId");
 
                 foreach (KeyValuePair<int, RecipeInfo> pair in recipes)
                 {
                     RecipeInfo recipe = pair.Value;
-                    if (recipe == null || recipe.Materials == null || recipe.Materials.Count == 0) continue;
+                    if (recipe?.Materials == null || !recipe.Materials.ContainsKey(itemId)) continue;
+                    int pickupCount = ReadPickupInt(pickup, "count");
+                    if (!CanPrepareRecipe(inventory, recipe, itemId, pickupCount)) continue;
+                    selectedPickup = pickup;
+                    selectedRecipe = recipe;
+                    return true;
+                }
+            }
+            return false;
+        }
 
-                    foreach (KeyValuePair<int, int> material in recipe.Materials)
-                    {
-                        int have = bag.GetItemTotalCount(material.Key);
-                        if (have < material.Value) bag.AddItem(material.Key, material.Value - have);
-                    }
+        /// <summary> 在背包副本中按真实顺序模拟拾取、补料和制造，确认容量与数量均可满足。 </summary>
+        private static bool CanPrepareRecipe(
+            IInventory inventory,
+            RecipeInfo recipe,
+            int lootItemId,
+            int lootItemCount)
+        {
+            List<BagSlotInfo> simulated = CloneBagSlots();
+            if (!TryAddToSlots(simulated, lootItemId, lootItemCount)) return false;
 
-                    int before = bag.GetItemTotalCount(recipe.ResultItemId);
-                    bool ok = bag.TryCraft(recipe, out string reason);
-                    int after = bag.GetItemTotalCount(recipe.ResultItemId);
+            foreach (KeyValuePair<int, int> material in recipe.Materials)
+            {
+                if (material.Key == lootItemId) continue;
+                int lack = material.Value - GetSlotTotal(simulated, material.Key);
+                if (lack > 0 && !TryAddToSlots(simulated, material.Key, lack)) return false;
+            }
 
-                    _craftResult = ok
-                        ? "PASS 配方" + recipe.RecipeId + "：成品 " + recipe.ResultItemId
-                          + " " + before + " → " + after + "（目标 +" + recipe.ResultCount + "，材料已扣除）"
-                        : "FAIL 配方" + recipe.RecipeId + " 制造失败：" + reason;
+            foreach (KeyValuePair<int, int> material in recipe.Materials)
+            {
+                if (!TryRemoveFromSlots(simulated, material.Key, material.Value)) return false;
+            }
+            return TryAddToSlots(simulated, recipe.ResultItemId, recipe.ResultCount);
+        }
+
+        /// <summary> 补齐非掉落材料后制造，并验证成品和所有材料的精确差值。 </summary>
+        private static string TryCraftUsingLoot(IInventory inventory, int lootItemId)
+        {
+            RecipeInfo recipe = _selectedLootRecipe;
+            if (recipe?.Materials == null || !recipe.Materials.ContainsKey(lootItemId))
+                return "FAIL 准备阶段配方丢失或不消耗本轮掉落";
+
+            foreach (KeyValuePair<int, int> material in recipe.Materials)
+            {
+                if (material.Key == lootItemId) continue;
+                int lack = material.Value - inventory.GetItemTotalCount(material.Key);
+                if (lack > 0 && !inventory.AddItem(material.Key, lack))
+                    return "FAIL 补充非掉落材料失败 itemId=" + material.Key;
+            }
+
+            var materialBefore = new Dictionary<int, int>();
+            foreach (KeyValuePair<int, int> material in recipe.Materials)
+                materialBefore[material.Key] = inventory.GetItemTotalCount(material.Key);
+            if (materialBefore[lootItemId] < recipe.Materials[lootItemId])
+                return "FAIL 本轮拾取材料不足 itemId=" + lootItemId;
+
+            int resultBefore = inventory.GetItemTotalCount(recipe.ResultItemId);
+            bool crafted = inventory.TryCraft(recipe, out string failReason);
+            int resultAfter = inventory.GetItemTotalCount(recipe.ResultItemId);
+            if (!crafted || resultAfter - resultBefore != recipe.ResultCount)
+                return "FAIL 成品差值错误 recipeId=" + recipe.RecipeId + " reason=" + failReason;
+
+            foreach (KeyValuePair<int, int> material in recipe.Materials)
+            {
+                int after = inventory.GetItemTotalCount(material.Key);
+                if (materialBefore[material.Key] - after != material.Value)
+                    return "FAIL 材料扣除错误 itemId=" + material.Key;
+            }
+            return "PASS 配方" + recipe.RecipeId + "消耗本轮掉落并精确生成成品";
+        }
+
+        /// <summary> 克隆当前背包槽位，供无副作用容量模拟。 </summary>
+        private static List<BagSlotInfo> CloneBagSlots()
+        {
+            var result = new List<BagSlotInfo>();
+            IReadOnlyList<BagSlotInfo> slots = GameRoot.Instance.BagController.GetAllSlots();
+            for (int i = 0; i < slots.Count; i++)
+            {
+                result.Add(new BagSlotInfo
+                {
+                    SlotId = slots[i].SlotId,
+                    ItemId = slots[i].ItemId,
+                    ItemCount = slots[i].ItemCount
+                });
+            }
+            return result;
+        }
+
+        /// <summary> 在槽位副本中添加物品，模拟真实堆叠和空槽占用。 </summary>
+        private static bool TryAddToSlots(List<BagSlotInfo> slots, int itemId, int count)
+        {
+            ItemInfo item = new ItemDao().GetItemById(itemId);
+            if (item == null || item.MaxStack <= 0 || count <= 0) return false;
+
+            int remaining = count;
+            for (int i = 0; i < slots.Count && remaining > 0; i++)
+            {
+                BagSlotInfo slot = slots[i];
+                if (slot.ItemId != itemId || slot.ItemCount >= item.MaxStack) continue;
+                int add = Math.Min(item.MaxStack - slot.ItemCount, remaining);
+                slot.ItemCount += add;
+                remaining -= add;
+            }
+            for (int i = 0; i < slots.Count && remaining > 0; i++)
+            {
+                BagSlotInfo slot = slots[i];
+                if (slot.ItemId != 0 || slot.ItemCount != 0) continue;
+                int add = Math.Min(item.MaxStack, remaining);
+                slot.ItemId = itemId;
+                slot.ItemCount = add;
+                remaining -= add;
+            }
+            return remaining == 0;
+        }
+
+        /// <summary> 在槽位副本中移除指定数量物品。 </summary>
+        private static bool TryRemoveFromSlots(List<BagSlotInfo> slots, int itemId, int count)
+        {
+            if (GetSlotTotal(slots, itemId) < count) return false;
+            int remaining = count;
+            for (int i = 0; i < slots.Count && remaining > 0; i++)
+            {
+                BagSlotInfo slot = slots[i];
+                if (slot.ItemId != itemId || slot.ItemCount <= 0) continue;
+                int remove = Math.Min(slot.ItemCount, remaining);
+                slot.ItemCount -= remove;
+                remaining -= remove;
+                if (slot.ItemCount == 0) slot.ItemId = 0;
+            }
+            return remaining == 0;
+        }
+
+        /// <summary> 统计槽位副本中的指定物品数量。 </summary>
+        private static int GetSlotTotal(List<BagSlotInfo> slots, int itemId)
+        {
+            int total = 0;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (slots[i].ItemId == itemId) total += slots[i].ItemCount;
+            }
+            return total;
+        }
+
+        /// <summary> 读取拾取物私有序列化整数，仅用于编辑器验收。 </summary>
+        private static int ReadPickupInt(PickupItem pickup, string propertyName)
+        {
+            if (pickup == null) return -1;
+            SerializedProperty property = new SerializedObject(pickup).FindProperty(propertyName);
+            return property != null ? property.intValue : -1;
+        }
+
+        /// <summary> 捕获全部背包槽位，供冒烟检查结束后原样恢复数据库和内存。 </summary>
+        private static void CaptureBagSnapshot(IInventory inventory)
+        {
+            _bagSnapshot.Clear();
+            if (inventory == null) return;
+            IReadOnlyList<BagSlotInfo> slots = GameRoot.Instance.BagController.GetAllSlots();
+            for (int i = 0; i < slots.Count; i++)
+            {
+                BagSlotInfo slot = slots[i];
+                _bagSnapshot.Add(new BagSlotInfo
+                {
+                    SlotId = slot.SlotId,
+                    ItemId = slot.ItemId,
+                    ItemCount = slot.ItemCount
+                });
+            }
+            _bagSnapshotCaptured = true;
+            SessionState.SetString(KeyBagSnapshot, SerializeBagSnapshot());
+        }
+
+        /// <summary> 将背包快照编码为跨域重载可保留的文本。 </summary>
+        private static string SerializeBagSnapshot()
+        {
+            var builder = new StringBuilder();
+            for (int i = 0; i < _bagSnapshot.Count; i++)
+            {
+                if (i > 0) builder.Append(';');
+                builder.Append(_bagSnapshot[i].SlotId).Append(',')
+                    .Append(_bagSnapshot[i].ItemId).Append(',')
+                    .Append(_bagSnapshot[i].ItemCount);
+            }
+            return builder.ToString();
+        }
+
+        /// <summary> 域重载后从 SessionState 恢复库存快照。 </summary>
+        private static void LoadBagSnapshotFromSession()
+        {
+            string serialized = SessionState.GetString(KeyBagSnapshot, string.Empty);
+            if (string.IsNullOrEmpty(serialized)) return;
+
+            _bagSnapshot.Clear();
+            string[] slotTexts = serialized.Split(';');
+            for (int i = 0; i < slotTexts.Length; i++)
+            {
+                string[] values = slotTexts[i].Split(',');
+                if (values.Length != 3 || !int.TryParse(values[0], out int slotId)
+                    || !int.TryParse(values[1], out int itemId)
+                    || !int.TryParse(values[2], out int itemCount))
+                {
+                    _bagSnapshot.Clear();
+                    _bagSnapshotCorrupted = true;
+                    _bagSnapshotRecoveredAfterReload = true;
                     return;
                 }
-
-                _craftResult = "SKIP 配方表里没有带材料的配方";
+                _bagSnapshot.Add(new BagSlotInfo
+                {
+                    SlotId = slotId,
+                    ItemId = itemId,
+                    ItemCount = itemCount
+                });
             }
-            catch (Exception e)
+            _bagSnapshotCaptured = _bagSnapshot.Count > 0;
+            _bagSnapshotRecoveredAfterReload = _bagSnapshotCaptured;
+        }
+
+        /// <summary> 事务恢复冒烟检查前的背包槽位，并同步实时内存。 </summary>
+        private static void RestoreBagSnapshot()
+        {
+            if (!_bagSnapshotCaptured || SqliteManager.Instance == null || !SqliteManager.Instance.IsReady)
+                return;
+
+            try
             {
-                _craftResult = "SKIP 读取配方失败：" + e.Message;
+                var bagDao = new BagDao();
+                SqliteManager.Instance.RunInTransaction(() =>
+                {
+                    for (int i = 0; i < _bagSnapshot.Count; i++)
+                        bagDao.UpdateSlot(_bagSnapshot[i]);
+                });
+
+                _bagSnapshotRestored = true;
+                SessionState.EraseString(KeyBagSnapshot);
+
+                IReadOnlyList<BagSlotInfo> liveSlots = GameRoot.Instance?.BagController?.GetAllSlots();
+                if (liveSlots == null || liveSlots.Count != _bagSnapshot.Count) return;
+                for (int i = 0; i < liveSlots.Count; i++)
+                {
+                    liveSlots[i].SlotId = _bagSnapshot[i].SlotId;
+                    liveSlots[i].ItemId = _bagSnapshot[i].ItemId;
+                    liveSlots[i].ItemCount = _bagSnapshot[i].ItemCount;
+                }
+                EventBus.Emit(EventName.Bag_Changed);
+            }
+            catch (Exception exception)
+            {
+                _errors.Add("库存恢复异常: " + exception.Message);
             }
         }
 
-        /// <summary> 从工程里的 LootTable 取掉落物品 ID（用于核对背包增量）。 </summary>
-        private static int ResolveLootItemId()
+        /// <summary> 将严格掉落检查标记为失败。 </summary>
+        private static void FailLootCheck(string reason)
         {
-            string[] guids = AssetDatabase.FindAssets("t:LootTable");
-            if (guids == null || guids.Length == 0) return -1;
-            LootTable table = AssetDatabase.LoadAssetAtPath<LootTable>(
-                AssetDatabase.GUIDToAssetPath(guids[0]));
-            if (table == null || table.Entries == null || table.Entries.Count == 0) return -1;
-            return table.Entries[0].ItemId;
+            _lootResult = "FAIL " + reason;
+            _craftResult = "FAIL 未完成严格制造链";
         }
 
         private static void SetPhase(int phase, double now)
@@ -533,6 +908,7 @@ namespace EditorTools
                 sourceFaction = Faction.Player,
                 hitPoint = sample.Brain.transform.position
             };
+            sample.KilledBySmokeCheck = true;
             sample.Root.Health.TakeDamage(context);
         }
 
@@ -612,7 +988,8 @@ namespace EditorTools
                     s.LastAlertSequence = s.Brain.LastReceivedAlertSequence;
 
                 if (s.Brain.NavigationStatus == EnemyNavigationStatus.Failed) s.NavFailedFrames++;
-                if (s.Brain.NavigationFailure != EnemyNavigationFailure.None) s.LastNavFailure = s.Brain.NavigationFailure;
+                if (s.Brain.NavigationFailure != EnemyNavigationFailure.None)
+                    s.LastNavFailure = s.Brain.NavigationFailure;
                 s.MoveDirSum += s.Brain.AdjustedNavigationDirection.magnitude;
 
                 if (_player != null)
@@ -643,6 +1020,9 @@ namespace EditorTools
             _phase = 99;
             SessionState.SetBool(KeyRunning, false);
             SessionState.SetInt(KeyPhase, 99);
+
+            if (_bagSnapshotCaptured && !_bagSnapshotRestored)
+                RestoreBagSnapshot();
 
             var sb = new StringBuilder();
             int pass = 0;
@@ -806,53 +1186,37 @@ namespace EditorTools
                 sb.AppendLine((cancelOk ? "[PASS] " : "[INFO] ") + "前摇取消: " + _cancelResult);
             }
 
-            // 10. 死亡掉落与拾取（10-08 批次：掉落 → 拾取 → 入包的完整链路）
-            if (_pickupCount > 0)
-            {
-                sb.AppendLine("[PASS] 敌人死亡掉落: 生成 " + _pickupCount + " 个拾取物");
-                pass++;
+            // 10. 严格死亡掉落与拾取：必须来自本轮 Loot_ItemSpawned，并精确入包一次。
+            bool lootOk = !string.IsNullOrEmpty(_lootResult) && _lootResult.StartsWith("PASS");
+            sb.AppendLine((lootOk ? "[PASS] " : "[FAIL] ") + "死亡掉落与拾取: "
+                + (_lootResult ?? "FAIL 未执行"));
+            if (lootOk) pass++; else fail++;
 
-                if (_bagBefore >= 0 && _bagAfter >= 0)
-                {
-                    bool picked = _bagAfter > _bagBefore;
-                    sb.AppendLine((picked ? "[PASS] " : "[FAIL] ")
-                        + "拾取入包: 物品 " + _lootItemId + " 数量 "
-                        + _bagBefore + " → " + _bagAfter);
-                    if (picked) pass++; else fail++;
-                }
-                else
-                {
-                    sb.AppendLine("[INFO] 拾取入包: 拿不到背包或掉落表，未核对数量（库存="
-                        + (GameRoot.Instance != null && GameRoot.Instance.Inventory != null)
-                        + "，物品ID=" + _lootItemId + "）");
-                }
-            }
-            else
-            {
-                sb.AppendLine("[INFO] 敌人死亡掉落: 本轮没有生成拾取物"
-                    + "（若地面层射线没找到落点就不会掉落，检查 EnemyLootDrop.groundMask）");
-            }
+            // 11. 严格制造链：配方必须消耗本轮掉落，且全部库存差值精确。
+            bool craftOk = !string.IsNullOrEmpty(_craftResult) && _craftResult.StartsWith("PASS");
+            sb.AppendLine((craftOk ? "[PASS] " : "[FAIL] ") + "制造链: "
+                + (_craftResult ?? "FAIL 未执行"));
+            if (craftOk) pass++; else fail++;
 
-            // 11. 制造链（配方数据来自数据库 CraftMain / CraftSecond）
-            if (!string.IsNullOrEmpty(_craftResult))
-            {
-                bool craftOk = _craftResult.StartsWith("PASS");
-                if (craftOk) pass++;
-                else if (!_craftResult.StartsWith("SKIP")) fail++;
-                sb.AppendLine((craftOk ? "[PASS] " : "[INFO] ") + "制造链: " + _craftResult);
-            }
+            bool restored = !_bagSnapshotCorrupted && (!_bagSnapshotCaptured || _bagSnapshotRestored);
+            sb.AppendLine((restored ? "[PASS] " : "[FAIL] ") + "库存恢复: "
+                + (restored ? "冒烟检查前状态已恢复" : "恢复失败，可能污染测试存档"));
+            if (restored) pass++; else fail++;
 
             sb.AppendLine();
             sb.AppendLine("TOTAL: pass=" + pass + " fail=" + fail);
             sb.AppendLine(fail == 0 ? ResultMarkerPass : ResultMarkerFail);
 
+            bool reportWritten = true;
             try
             {
                 File.WriteAllText(_resultPath, sb.ToString(), Encoding.UTF8);
             }
-            catch (Exception e)
+            catch (Exception exception)
             {
-                sb.AppendLine("[FAIL] 结果文件写入失败: " + e.Message);
+                reportWritten = false;
+                fail++;
+                Debug.LogError("[PlayModeSmokeCheck] 结果文件写入失败: " + exception.Message);
             }
 
             if (_subscribed)
@@ -861,8 +1225,14 @@ namespace EditorTools
                 EditorApplication.update -= Tick;
                 _subscribed = false;
             }
+            _lootDroppedToken?.Dispose();
+            _lootSpawnToken?.Dispose();
+            _pickupCompletedToken?.Dispose();
+            _lootDroppedToken = null;
+            _lootSpawnToken = null;
+            _pickupCompletedToken = null;
 
-            EditorApplication.Exit(fail == 0 ? 0 : 1);
+            EditorApplication.Exit(fail == 0 && reportWritten ? 0 : 1);
         }
     }
 }
