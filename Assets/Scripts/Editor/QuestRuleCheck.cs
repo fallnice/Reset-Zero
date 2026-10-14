@@ -288,6 +288,13 @@ namespace EditorTools
                 connection = new SqliteConnection("Data Source=:memory:");
                 connection.Open();
                 SetPrivateField(manager, "_connection", connection);
+
+                // 关键：生产组件（BagController / 各 DAO）一律走 `SqliteManager.Instance`，
+                // 只给临时组件注入连接是不够的——必须让单例也指向这个实例，否则 DAO 里
+                // `SqliteManager.Instance.ExecuteQuery` 会拿到没连接的实例并抛空引用。
+                SetPrivateStaticField(typeof(SqliteManager),
+                    "<Instance>k__BackingField", manager);
+
                 CreateProductionTestTables(manager);
 
                 var bag = new BagController();
@@ -337,7 +344,9 @@ namespace EditorTools
             }
             catch (Exception exception)
             {
-                Assert(false, "生产 SQLite 回滚验收异常: " + exception.Message, builder,
+                // 带上堆栈：只在完整资产机器上才跑得到这一段，没有堆栈没法定位
+                Assert(false, "生产 SQLite 回滚验收异常: " + exception.Message
+                    + " | 堆栈: " + exception.StackTrace, builder,
                     ref passCount, ref failCount);
             }
             finally
@@ -359,6 +368,15 @@ namespace EditorTools
                 "INSERT INTO ItemConfig VALUES (3001, '任务奖励', 'Quest', '', 10)");
             for (int i = 1; i <= 30; i++)
                 manager.ExecuteNonQuery($"INSERT INTO PlayerBag VALUES ({i}, 0, 0)");
+        }
+
+        /// <summary> 通过反射设置私有静态字段（用于把单例指向测试用的实例）。 </summary>
+        private static void SetPrivateStaticField(System.Type type, string fieldName, object value)
+        {
+            System.Reflection.FieldInfo field = type.GetField(
+                fieldName, System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (field == null) throw new System.MissingFieldException(type.Name, fieldName);
+            field.SetValue(null, value);
         }
 
         /// <summary> 通过反射设置仅供生产组件维护的私有测试依赖。 </summary>
