@@ -158,12 +158,16 @@ namespace Enemy.Navigation
             float radius = _config.avoidanceNeighborRadius;
             if (radius <= 0f || _config.avoidanceAgentMask.value == 0) return;
 
-            int colliderCount = Physics.OverlapSphereNonAlloc(
-                _agent.position,
-                radius,
-                _neighborBuffer,
-                _config.avoidanceAgentMask,
-                QueryTriggerInteraction.Ignore);
+            int colliderCount;
+            using (EnemyProfilerMarkers.AvoidanceNeighborQuery.Auto())
+            {
+                colliderCount = Physics.OverlapSphereNonAlloc(
+                    _agent.position,
+                    radius,
+                    _neighborBuffer,
+                    _config.avoidanceAgentMask,
+                    QueryTriggerInteraction.Ignore);
+            }
             IsNeighborBufferSaturated = colliderCount >= _neighborBuffer.Length;
 
             for (int i = 0; i < colliderCount && _neighborCount < _neighbors.Length; i++)
@@ -213,14 +217,18 @@ namespace Enemy.Navigation
                 if (probeDistance > 0f && _config.navigationObstacleMask.value != 0)
                 {
                     // 多命中查询用于跳过自身 Collider 后继续找到真实墙体；固定数组避免每轮采样产生 GC。
-                    int hitCount = Physics.SphereCastNonAlloc(
-                        origin,
-                        probeRadius,
-                        direction,
-                        _obstacleHits,
-                        probeDistance,
-                        _config.navigationObstacleMask,
-                        QueryTriggerInteraction.Ignore);
+                    int hitCount;
+                    using (EnemyProfilerMarkers.AvoidanceObstacleQuery.Auto())
+                    {
+                        hitCount = Physics.SphereCastNonAlloc(
+                            origin,
+                            probeRadius,
+                            direction,
+                            _obstacleHits,
+                            probeDistance,
+                            _config.navigationObstacleMask,
+                            QueryTriggerInteraction.Ignore);
+                    }
                     float nearestDistance = probeDistance;
                     bool foundObstacle = false;
                     for (int hitIndex = 0; hitIndex < hitCount; hitIndex++)

@@ -152,14 +152,19 @@ namespace Enemy.Navigation
                 ? _config.failedRetryInterval
                 : _config.repathInterval);
 
-            bool success = grid.Pathfinder.TryFindPath(
-                _agent.position,
-                _destination,
-                _config.maxSearchNodes,
-                _path,
-                out _pathCount,
-                out EnemyNavigationFailure failure,
-                _influenceMap);
+            bool success;
+            EnemyNavigationFailure failure;
+            using (EnemyProfilerMarkers.PathRebuild.Auto())
+            {
+                success = grid.Pathfinder.TryFindPath(
+                    _agent.position,
+                    _destination,
+                    _config.maxSearchNodes,
+                    _path,
+                    out _pathCount,
+                    out failure,
+                    _influenceMap);
+            }
 
             if (!success)
             {

@@ -1,6 +1,7 @@
 using Core;
 using Controller;
 using DAO;
+using Dao;
 using Interaction;
 using Model;
 using UnityEngine;
@@ -19,6 +20,7 @@ public class GameRoot : MonoBehaviour
     public CraftController CraftController { get; private set; }
     public BonusController BonusController { get; private set; }
     public QuestController QuestController { get; private set; }
+    public GameplayFeedbackController GameplayFeedbackController { get; private set; }
     public UIController UIController { get; private set; }
 
     [Header("任务系统")]
@@ -78,6 +80,9 @@ public class GameRoot : MonoBehaviour
 
         BonusController = new BonusController();
         BonusController.Init(BagController);
+
+        GameplayFeedbackController = new GameplayFeedbackController(new ItemDao());
+        GameplayFeedbackController.Initialize();
 
         QuestController = new QuestController(BagController, new QuestDao());
         if (questDefinition == null)
@@ -231,6 +236,7 @@ public class GameRoot : MonoBehaviour
     private void OnDestroy()
     {
         SceneManager.sceneLoaded -= HandleSceneLoaded;
+        GameplayFeedbackController?.Dispose();
         QuestController?.Dispose();
         if (Instance == this) Instance = null;
     }
@@ -238,6 +244,7 @@ public class GameRoot : MonoBehaviour
     private void OnApplicationQuit()
     {
         SceneManager.sceneLoaded -= HandleSceneLoaded;
+        GameplayFeedbackController?.Dispose();
         QuestController?.Dispose();
         Instance = null;
     }

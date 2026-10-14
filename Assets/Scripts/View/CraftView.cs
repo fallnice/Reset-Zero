@@ -269,13 +269,8 @@ namespace View
             }
 
             if (success)
-            {
                 RefreshDetail(); // 制作完成刷新所有数据
-            }
-            else
-            {
-                EventBus.Emit(EventName.UI_Toast, "材料不足");
-            }
+            // 失败原因由 Craft_Fail 领域事件统一转换为玩家提示，避免 View 猜测并重复显示。
         }
 
         // 加载物品图标

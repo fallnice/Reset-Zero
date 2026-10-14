@@ -124,6 +124,15 @@ namespace Enemy.Influence
         /// <summary> 低频重建下一份快照，变化后原子交换数组供所有敌人读取。 </summary>
         private void Refresh()
         {
+            using (EnemyProfilerMarkers.InfluenceRefresh.Auto())
+            {
+                BuildSnapshot();
+            }
+        }
+
+        /// <summary> 构建下一份动态成本快照。 </summary>
+        private void BuildSnapshot()
+        {
             System.Array.Clear(_nextCosts, 0, _nextCosts.Length);
             PlayerSourceCount = 0;
             EnemySourceCount = 0;

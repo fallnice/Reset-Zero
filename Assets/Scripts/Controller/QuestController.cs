@@ -111,7 +111,6 @@ namespace Controller
             PublishChanged();
             EventBus.Emit(EventName.Quest_Completed, _definition.QuestId,
                 _definition.RewardItemId, _definition.RewardCount);
-            EventBus.Emit(EventName.UI_Toast, "任务完成：" + _definition.Title);
             return true;
         }
 

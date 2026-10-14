@@ -229,6 +229,15 @@ namespace Enemy
 
         private void Update()
         {
+            using (EnemyProfilerMarkers.BrainTick.Auto())
+            {
+                TickBrain();
+            }
+        }
+
+        /// <summary> 执行本帧敌人感知、决策、状态切换与导航更新。 </summary>
+        private void TickBrain()
+        {
             if (config == null)
             {
                 Debug.LogWarning("[EnemyBrain] 未分配 EnemyConfig，敌人 AI 已停止", this);

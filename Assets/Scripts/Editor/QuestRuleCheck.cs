@@ -12,8 +12,10 @@ using Dao;
 using Model;
 using Mono.Data.Sqlite;
 using Role;
+using TMPro;
 using UnityEditor;
 using UnityEngine;
+using View;
 using Object = UnityEngine.Object;
 
 namespace EditorTools
@@ -57,7 +59,16 @@ namespace EditorTools
                 Assert(controller.TryAccept() && controller.State == QuestState.Active,
                     "任务接取后进入 Active 并持久化", builder, ref passCount, ref failCount);
 
-                EventBus.Emit(EventName.Pickup_Completed, null, 1001, 2);
+                EventBus.Emit(EventName.Pickup_Completed, null, 1001, 1);
+                controller.Dispose();
+                controller = new QuestController(inventory, repository);
+                Assert(controller.Initialize(definition)
+                    && controller.State == QuestState.Active
+                    && controller.Progress[0] == 1,
+                    "中途重载后恢复 Active 状态与目标进度", builder, ref passCount, ref failCount);
+                VerifyQuestViewLifecycle(controller, definition, builder, ref passCount, ref failCount);
+
+                EventBus.Emit(EventName.Pickup_Completed, null, 1001, 1);
                 EventBus.Emit(EventName.Craft_Success, 10, 2001, 1);
                 VerifyInvalidKillsIgnored(controller, victim, attacker, attackerObject, builder,
                     ref passCount, ref failCount);
@@ -129,6 +140,50 @@ namespace EditorTools
             builder.AppendLine($"TOTAL: pass={passCount} fail={failCount}");
             report = builder.ToString();
             return failCount == 0;
+        }
+
+        /// <summary> 验证任务 HUD 在启用、禁用和重新启用时正确同步状态且不重复订阅。 </summary>
+        private static void VerifyQuestViewLifecycle(
+            QuestController controller,
+            QuestDefinition definition,
+            StringBuilder builder,
+            ref int passCount,
+            ref int failCount)
+        {
+            var viewObject = new GameObject("QuestRuleView");
+            viewObject.SetActive(false);
+            try
+            {
+                TextMeshProUGUI text = viewObject.AddComponent<TextMeshProUGUI>();
+                QuestView view = viewObject.AddComponent<QuestView>();
+                SetPrivateField(view, "questText", text);
+                InvokePrivateMethod(view, "OnEnable");
+                string activeText = text.text ?? string.Empty;
+                bool activeRendered = activeText.Contains(definition.Title)
+                    && activeText.Contains("1/2")
+                    && activeText.Contains("0/1");
+
+                InvokePrivateMethod(view, "OnDisable");
+                string disabledText = text.text ?? string.Empty;
+                EventBus.Emit(EventName.Quest_Changed, definition, QuestState.ReadyToTurnIn,
+                    new[] { 2, 1, 1 });
+                bool disabledIgnored = text.text == disabledText;
+
+                InvokePrivateMethod(view, "OnEnable");
+                string reenabledText = text.text ?? string.Empty;
+                bool reenabledRendered = reenabledText.Contains(definition.Title)
+                    && reenabledText.Contains("1/2")
+                    && !reenabledText.Contains("可交付");
+                Assert(activeRendered && disabledIgnored && reenabledRendered,
+                    "任务 HUD 启用查询、禁用退订与重新启用恢复正确", builder,
+                    ref passCount, ref failCount);
+                InvokePrivateMethod(view, "OnDisable");
+                Object.DestroyImmediate(view);
+            }
+            finally
+            {
+                Object.DestroyImmediate(viewObject);
+            }
         }
 
         /// <summary> 创建覆盖三类目标和物品奖励的临时任务定义。 </summary>
@@ -386,6 +441,15 @@ namespace EditorTools
                 fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             if (field == null) throw new MissingFieldException(target.GetType().Name, fieldName);
             field.SetValue(target, value);
+        }
+
+        /// <summary> 显式调用 Unity 私有生命周期方法，供无场景编辑器验收使用。 </summary>
+        private static void InvokePrivateMethod(object target, string methodName)
+        {
+            MethodInfo method = target.GetType().GetMethod(
+                methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            if (method == null) throw new MissingMethodException(target.GetType().Name, methodName);
+            method.Invoke(target, null);
         }
 
         /// <summary> 读取单个整数查询结果。 </summary>
