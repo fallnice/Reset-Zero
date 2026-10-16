@@ -229,6 +229,72 @@ namespace EditorTools
             RegisterChecker("敌人掉落配置", CheckEnemyLoot);
             RegisterChecker("任务系统配置", CheckQuestSystem);
             RegisterChecker("A* 导航网格配置", CheckEnemyNavigationGrid);
+            RegisterChecker("敌人性能埋点配置", CheckEnemyProfilerMarkers);
+        }
+
+        /// <summary>
+        /// 性能埋点（10-14 批次）：`EnemyProfilerMarkers` 的 5 个 marker 名字是给 Profiler 窗口
+        /// 搜索用的契约，且必须真的在对应位置用 Auto() 采样。改名或漏埋只能等到你跑 Profiler
+        /// 时才发现，这里用源码静态检查提前挡住。
+        /// 注意：无头（-batchmode -nographics）下开 Profiler.enabled 会让编辑器 SIGSEGV，
+        /// 所以运行期不做采样，只做静态检查。
+        /// </summary>
+        private static CheckResult CheckEnemyProfilerMarkers()
+        {
+            string root = Directory.GetParent(Application.dataPath).FullName;
+
+            // marker 名 → 必须使用它 Auto() 采样的文件
+            string[,] expected =
+            {
+                { "Enemy.Brain.Tick", "Assets/Scripts/Enemy/EnemyBrain.cs", "BrainTick" },
+                { "Enemy.Navigation.Repath", "Assets/Scripts/Enemy/Navigation/GridAStarNavigation.cs", "PathRebuild" },
+                { "Enemy.Avoidance.NeighborQuery", "Assets/Scripts/Enemy/Navigation/ContextSteeringAvoidance.cs", "AvoidanceNeighborQuery" },
+                { "Enemy.Avoidance.ObstacleQuery", "Assets/Scripts/Enemy/Navigation/ContextSteeringAvoidance.cs", "AvoidanceObstacleQuery" },
+                { "Enemy.Influence.Refresh", "Assets/Scripts/Enemy/Influence/EnemyInfluenceMap.cs", "InfluenceRefresh" }
+            };
+
+            string markerSource = ReadProjectFile(root, "Assets/Scripts/Enemy/EnemyProfilerMarkers.cs");
+            if (markerSource == null)
+                return new CheckResult(false, "找不到 Assets/Scripts/Enemy/EnemyProfilerMarkers.cs（性能埋点缺失）");
+
+            List<string> missing = new List<string>();
+            for (int i = 0; i < expected.GetLength(0); i++)
+            {
+                string markerName = expected[i, 0];
+                string file = expected[i, 1];
+                string field = expected[i, 2];
+
+                // 1. 埋点声明：名字必须与契约一字不差
+                string declaration = "new ProfilerMarker(\"" + markerName + "\")";
+                if (!markerSource.Contains(declaration))
+                {
+                    missing.Add(markerName + "(声明)");
+                    continue;
+                }
+
+                // 2. 采样点：对应文件里必须有 EnemyProfilerMarkers.<字段>.Auto()
+                string source = ReadProjectFile(root, file);
+                if (source == null || !source.Contains("EnemyProfilerMarkers." + field + ".Auto()"))
+                    missing.Add(markerName + "(未采样于 " + Path.GetFileName(file) + ")");
+            }
+
+            return missing.Count == 0
+                ? new CheckResult(true, "5 个 EnemyProfilerMarkers 均已声明并采样（Profiler 可按名搜索）")
+                : new CheckResult(false, "性能埋点缺失: " + string.Join("，", missing.ToArray()));
+        }
+
+        private static string ReadProjectFile(string root, string relativePath)
+        {
+            try
+            {
+                string full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                return File.Exists(full) ? File.ReadAllText(full, Encoding.UTF8) : null;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[SceneAudit] 读取源码失败 " + relativePath + ": " + exception.Message);
+                return null;
+            }
         }
 
         /// <summary> 启动入口：GameRoot 缺失 = 无任何模块初始化 </summary>

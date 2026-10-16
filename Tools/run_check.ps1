@@ -24,6 +24,11 @@
 # NOTE: keep this file ASCII-only. PowerShell 5.1 decodes .ps1 with the ANSI
 # codepage; non-ASCII bytes in a BOM-less UTF-8 file get garbled.
 #
+# -IncludePersistence runs the quest persistence audit: it needs THREE sequential
+# Unity processes (each stage quits and restarts the editor), because the point is
+# to verify a REAL process restart, not just re-initializing in the same process.
+# ~20s per stage.
+#
 # -IncludeTactics runs the tactics audit (Influence Map / group alert / hearing):
 # also a headless PlayMode run, but it actively manipulates actors (teleport,
 # kill, disable, fire a gun) to build the scenarios, so it is slower than the
@@ -35,7 +40,8 @@ param(
     [int]$TimeoutSeconds = 180,
     [switch]$Force,
     [switch]$IncludePlayMode,
-    [switch]$IncludeTactics
+    [switch]$IncludeTactics,
+    [switch]$IncludePersistence
 )
 
 $ErrorActionPreference = 'Stop'
@@ -140,6 +146,7 @@ $compilePass = $null   # $null = skipped
 $auditPass = $null     # $null = skipped
 $playPass = $null      # $null = skipped (only runs with -IncludePlayMode)
 $tacticsPass = $null   # $null = skipped (only runs with -IncludeTactics)
+$persistencePass = $null   # $null = skipped (only runs with -IncludePersistence)
 
 if ($Unity) {
     # Refuse to run while the editor has this project open: concurrent batchmode
@@ -222,7 +229,7 @@ if ($Unity) {
 
     # ---------- Step 4: Tactics audit (Influence Map / group alert / hearing) ----------
     if ($IncludeTactics) {
-        Write-Host '[4/4] Tactics audit (headless, takes 2-4 min) ...'
+        Write-Host '[4/5] Tactics audit (headless, takes 2-4 min) ...'
         $tcLog = Join-Path $env:TEMP 'unity_tactics_audit.log'
         $tcRunLog = Join-Path $env:TEMP 'unity_tactics_run.log'
         if (Test-Path $tcLog) { Remove-Item $tcLog -Force }
@@ -243,6 +250,33 @@ if ($Unity) {
             $tacticsPass = $false
         }
     }
+
+    # ---------- Step 5: Quest persistence across real Unity restarts ----------
+    if ($IncludePersistence) {
+        Write-Host '[5/5] Quest persistence (3 sequential Unity processes, ~1 min) ...'
+        $qpLog = Join-Path $env:TEMP 'unity_quest_persistence_audit.log'
+        $qpState = Join-Path $env:TEMP 'unity_quest_persistence_state.txt'
+        if (Test-Path $qpLog) { Remove-Item $qpLog -Force }
+        if (Test-Path $qpState) { Remove-Item $qpState -Force }
+
+        try {
+            for ($stage = 1; $stage -le 3; $stage++) {
+                Write-Host "       stage $stage/3 ..."
+                $qpRunLog = Join-Path $env:TEMP "unity_quest_persistence_run_$stage.log"
+                $null = Invoke-UnityBatch -LogPath $qpRunLog -ExecuteMethod 'EditorTools.QuestPersistenceCheck.RunFromCommandLine' -NoQuit
+            }
+        } catch {
+            Write-Host "[WARN] Quest persistence run did not finish cleanly: $($_.Exception.Message)"
+        }
+
+        if (Test-Path $qpLog) {
+            Get-Content $qpLog | ForEach-Object { Write-Host ("  " + $_) }
+            $persistencePass = [bool](Select-String -Path $qpLog -Pattern 'QUEST_PERSISTENCE_RESULT: PASS' -Quiet)
+        } else {
+            Write-Host "[FAIL] Quest persistence result log not generated: $qpLog"
+            $persistencePass = $false
+        }
+    }
 }
 
 # ---------- Summary ----------
@@ -258,11 +292,16 @@ if ($IncludeTactics) {
     Write-Host ("[AutoCheck] Tactics : " + $(if ($null -eq $tacticsPass) { 'SKIPPED' } elseif ($tacticsPass) { 'PASS' } else { 'FAIL' }))
 }
 
+if ($IncludePersistence) {
+    Write-Host ("[AutoCheck] Persist : " + $(if ($null -eq $persistencePass) { 'SKIPPED' } elseif ($persistencePass) { 'PASS' } else { 'FAIL' }))
+}
+
 $overallPass = ($staticPass) -and
                ($null -eq $compilePass -or $compilePass) -and
                ($null -eq $auditPass -or $auditPass) -and
                ($null -eq $playPass -or $playPass) -and
-               ($null -eq $tacticsPass -or $tacticsPass)
+               ($null -eq $tacticsPass -or $tacticsPass) -and
+               ($null -eq $persistencePass -or $persistencePass)
 
 if ($overallPass) {
     Write-Host 'AUTO CHECK: ALL PASS'

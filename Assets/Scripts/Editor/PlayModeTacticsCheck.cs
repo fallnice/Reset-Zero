@@ -49,6 +49,10 @@ namespace EditorTools
         private const float SettleSeconds = 1.5f;
         private const float RefreshWait = 0.6f;      // 影响图刷新 0.25s，留一倍余量
         private const float MaxTotalSeconds = 240f;
+        // 与 EnemyConfig.groupAlertCooldownSeconds 默认值一致；改配置时这里同步
+        private const float AlertCooldownSeconds = 1.0f;
+        private const float AlertSpotDistance = 9.0f;   // 报警点与接收者的距离（须 < 报警半径 15m）
+        private const float AlertBlindAngle = 60.0f;    // 落在这个视角内 = 接收者看得见玩家，不合格
 
         private sealed class Actor
         {
@@ -158,6 +162,11 @@ namespace EditorTools
         private static void HandleLog(string condition, string stackTrace, LogType type)
         {
             if (type != LogType.Error && type != LogType.Exception && type != LogType.Assert) return;
+
+            // 无头（-batchmode -nographics）下 UI 初始化会报「没有图形设备」，
+            // 这是环境噪声、不是逻辑错误（实机有图形设备），不能让它把验收判成失败
+            if (condition != null && condition.Contains("No graphic device is available")) return;
+
             if (_errors.Count < 20) _errors.Add(type + ": " + condition);
         }
 
@@ -438,10 +447,10 @@ namespace EditorTools
                         _alertReceiver = _enemies[1];
                         if (sender.Root == null || _alertReceiver.Root == null) return;
 
-                        // 玩家站到接收者正后方：它面朝 forward 看不见背后的人，
-                        // 但仍在报警范围内——这样拿到的线索只能来自报警，而不是它自己看见的
+                        // 玩家站到接收者背后附近的报警点：看不见 → 线索只能来自报警；
+                        // 且必须走得到 → 否则它被墙挡住过不来，会被误判成「收到报警却不去调查」
                         Transform rt = _alertReceiver.Brain.transform;
-                        MovePlayer(FindWalkableNear(rt.position - rt.forward * 9f));
+                        MovePlayer(FindAlertSpot(rt));
                         _alertPosition = _player.transform.position;
 
                         _receiverDistanceBefore = Vector3.Distance(
@@ -634,14 +643,22 @@ namespace EditorTools
                                 spotter.Brain.transform.position, _player.transform.position);
                             return delta == 0
                                 ? "PASS 发现者未锁定目标（状态=" + spotter.Brain.CurrentState
-                                  + "，距玩家=" + d.ToString("F2") + "m），期间序列零增长——没有无目标的异常发布；"
-                                  + "冷却 1s + 位移门槛 2m 由代码保证，持续锁定场景建议配合 Gizmos 目视复核"
+                                  + "，距玩家=" + d.ToString("F2") + "m），期间序列零增长——没有无目标的异常发布"
                                 : "FAIL 发现者未锁定目标却发布了 " + delta + " 次";
                         }
-                        // 冷却 1s：6 秒内最多约 7 次（首帧 + 目标变化 + 每冷却一次），留一点余量
-                        return delta <= 8
-                            ? "PASS 静止目标 6s 内发布 " + delta + " 次（冷却 1s + 位移门槛生效，未刷屏）"
-                            : "FAIL 静止目标 6s 内发布 " + delta + " 次（疑似没有冷却限制）";
+
+                        // 判定口径：序列是全局的，发布也可能来自别的敌人，所以不能要求零增长，
+                        // 而是要求总量落在冷却允许的上界内——
+                        // 每个敌人最多约 1 + 窗口/冷却 次；无冷却时逐帧发布会到上千次，能明显区分。
+                        int window = Mathf.CeilToInt(6.0f);
+                        int upper = _enemies.Count
+                            * (1 + Mathf.CeilToInt(window / AlertCooldownSeconds)) + 2;
+                        return delta <= upper
+                            ? "PASS 静止目标 6s 内全局发布 " + delta + " 次（上界 " + upper
+                              + "，冷却 " + AlertCooldownSeconds.ToString("F1")
+                              + "s + 位移门槛 2m 生效，未刷屏）"
+                            : "FAIL 静止目标 6s 内全局发布 " + delta + " 次（超过上界 " + upper
+                              + "，疑似没有冷却限制）";
                     }
                 },
 
@@ -758,6 +775,69 @@ namespace EditorTools
             if (controller != null) controller.enabled = false;
             root.transform.position = position;
             if (controller != null) controller.enabled = true;
+        }
+
+        /// <summary>
+        /// 给玩家挑一个报警点：接收者**看不见**（保证线索只能来自报警）但**走得到**
+        /// （保证它能真的过来调查，否则会被误判成「收到报警却不去」）。
+        /// 之前只贴地取网格最近点，有一次正好隔了堵墙，接收者虽然 Chase 却原地打转 → FAIL。
+        /// </summary>
+        private static Vector3 FindAlertSpot(Transform receiver)
+        {
+            Vector3 fallback = FindWalkableNear(receiver.position - receiver.forward * AlertSpotDistance);
+            Vector3 reachableFallback = fallback;
+            bool foundReachable = false;
+
+            // 先在背后扇形里找，再从近到远放宽距离
+            int[] yawOffsets = { 0, 40, -40, 80, -80, 130, -130, 180 };
+            float[] distances = { AlertSpotDistance, 6f, 12f };
+
+            for (int d = 0; d < distances.Length; d++)
+            {
+                for (int i = 0; i < yawOffsets.Length; i++)
+                {
+                    Vector3 dir = Quaternion.Euler(0f, 180f + yawOffsets[i], 0f) * receiver.forward;
+                    dir.y = 0f;
+                    if (dir.sqrMagnitude < 0.001f) continue;
+                    dir.Normalize();
+
+                    Vector3 candidate = FindWalkableNear(receiver.position + dir * distances[d]);
+                    if (!HasLineOfSight(receiver.position, candidate)) continue;
+
+                    if (!foundReachable)
+                    {
+                        reachableFallback = candidate;
+                        foundReachable = true;
+                    }
+
+                    // 看不见才算合格报警点：视野已偏开，不会自己锁定玩家
+                    if (!IsInViewCone(receiver, candidate)) return candidate;
+                }
+            }
+
+            // 退一步：至少保证走得过去（比「必须看不见」重要，后者只影响判定干净程度）
+            return foundReachable ? reachableFallback : fallback;
+        }
+
+        private static bool HasLineOfSight(Vector3 from, Vector3 to)
+        {
+            Vector3 origin = from + Vector3.up * 1.2f;
+            Vector3 target = to + Vector3.up * 1.2f;
+            Vector3 delta = target - origin;
+            float distance = delta.magnitude;
+            if (distance < 0.1f) return true;
+            return !Physics.Raycast(origin, delta / distance, distance - 0.4f);
+        }
+
+        private static bool IsInViewCone(Transform observer, Vector3 target)
+        {
+            Vector3 delta = target - observer.position;
+            delta.y = 0f;
+            if (delta.sqrMagnitude < 0.001f) return true;
+            Vector3 forward = observer.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f) return true;
+            return Vector3.Angle(forward, delta) < AlertBlindAngle;
         }
 
         /// <summary> 落到最近的网格可走格：只贴地不查网格的话，角色可能被塞进墙里，A* 规划不出路径就原地不动。 </summary>

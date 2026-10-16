@@ -15,6 +15,7 @@ using Role;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Profiling;
 
 namespace EditorTools
 {
@@ -166,6 +167,16 @@ namespace EditorTools
         private static int _questRewardBefore = -1;
         private static int _questRewardAfter = -1;
 
+        // ── 玩法反馈与性能埋点（10-14 批次：反馈不重复、Profiler 埋点生效） ──
+        private static EventBus.SubscriptionToken _toastToken;
+        private static readonly List<string> _toastSequence = new List<string>();
+        private static int _toastCountBeforePickup = -1;
+        private static int _toastCountBeforeCraft = -1;
+        private static int _toastCountBeforeTurnIn = -1;
+        private static string _feedbackResult;
+        private static List<KeyValuePair<string, Recorder>> _recorders;
+        private static string _profilerResult;
+
         static PlayModeSmokeCheck()
         {
             // 域重载后（进入 PlayMode 的那一刻）由 [InitializeOnLoad] 触发，把流程续上
@@ -180,6 +191,7 @@ namespace EditorTools
             Application.logMessageReceived += HandleLog;
             EditorApplication.update += Tick;
             SubscribeLootEvents();
+            StartFeedbackAndProfilerObservation();
         }
 
         /// <summary>
@@ -213,6 +225,7 @@ namespace EditorTools
             SessionState.SetBool(KeyRunning, true);
             ResetLootState();
             SubscribeLootEvents();
+            StartFeedbackAndProfilerObservation();
 
             if (!_subscribed)
             {
@@ -271,6 +284,39 @@ namespace EditorTools
             _lootDroppedToken = EventBus.Subscribe(EventName.Loot_Dropped, HandleLootDropped);
             _lootSpawnToken = EventBus.Subscribe(EventName.Loot_ItemSpawned, HandleLootItemSpawned);
             _pickupCompletedToken = EventBus.Subscribe(EventName.Pickup_Completed, HandlePickupCompleted);
+        }
+
+        /// <summary>
+        /// 订阅 UI_Toast 并开启 Profiler Recorder，用于验证 10-14 批次的两件事：
+        /// 玩法反馈是否重复/互相覆盖，以及 `EnemyProfilerMarkers` 的埋点是否真的被采样
+        /// （后者决定你在 Profiler 窗口里能不能按那 5 个名字搜到）。
+        /// </summary>
+        private static void StartFeedbackAndProfilerObservation()
+        {
+            _toastToken?.Dispose();
+            _toastToken = EventBus.Subscribe(EventName.UI_Toast, HandleToast);
+
+            _recorders = new List<KeyValuePair<string, Recorder>>
+            {
+                new KeyValuePair<string, Recorder>("Enemy.Brain.Tick", Recorder.Get("Enemy.Brain.Tick")),
+                new KeyValuePair<string, Recorder>("Enemy.Navigation.Repath", Recorder.Get("Enemy.Navigation.Repath")),
+                new KeyValuePair<string, Recorder>("Enemy.Avoidance.NeighborQuery", Recorder.Get("Enemy.Avoidance.NeighborQuery")),
+                new KeyValuePair<string, Recorder>("Enemy.Avoidance.ObstacleQuery", Recorder.Get("Enemy.Avoidance.ObstacleQuery")),
+                new KeyValuePair<string, Recorder>("Enemy.Influence.Refresh", Recorder.Get("Enemy.Influence.Refresh"))
+            };
+
+            // 注意：无头（-batchmode -nographics）下不要开 Profiler.enabled，
+            // 实测会让编辑器 SIGSEGV；Recorder 只在自身 enabled 时尝试采样，采不到就记为 INFO
+            for (int i = 0; i < _recorders.Count; i++) _recorders[i].Value.enabled = true;
+        }
+
+        /// <summary> 记录玩家可见提示的出现顺序，用于判断有没有重复提示或互相覆盖。 </summary>
+        private static void HandleToast(object[] args)
+        {
+            if (args == null || args.Length < 1) return;
+            string message = args[0] as string;
+            if (string.IsNullOrEmpty(message)) return;
+            if (_toastSequence.Count < 60) _toastSequence.Add(message);
         }
 
         /// <summary> 记录本轮由冒烟击杀阶段触发掉落结算的受害角色。 </summary>
@@ -424,6 +470,7 @@ namespace EditorTools
                         Finish(null);
                         return;
                     }
+                    _toastCountBeforeTurnIn = _toastSequence.Count;
                     controller.TryTurnIn();
                     _questStageStart = (float)now;
                     _questStage = 2;
@@ -437,6 +484,12 @@ namespace EditorTools
                           + "，奖励 " + QuestRewardItemId + " 数量 "
                           + _questRewardBefore + " → " + _questRewardAfter
                         : "FAIL 交付未完成，状态=" + controller.State;
+
+                    // 任务完成提示应由 Quest_Completed 的奖励事实生成（避免通用文案覆盖奖励信息）
+                    string turnInFeedback = DescribeFeedback(_toastCountBeforeTurnIn, "任务完成，获得");
+                    _feedbackResult = string.IsNullOrEmpty(_feedbackResult)
+                        ? turnInFeedback
+                        : _feedbackResult + "；" + turnInFeedback;
                     Finish(null);
                     break;
             }
@@ -560,6 +613,7 @@ namespace EditorTools
                         SetPhase(6, now);
                         break;
                     }
+                    _toastCountBeforePickup = _toastSequence.Count;
                     _selectedLootPickup.OnInteract(_player.gameObject);
                     _lootStageStart = (float)now;
                     _lootStage = 1;
@@ -620,11 +674,90 @@ namespace EditorTools
                 return;
             }
 
+            // 玩法反馈：一次拾取 / 一次制造应各只产生一条提示，且不被别的文案覆盖
+            string pickupFeedback = DescribeFeedback(_toastCountBeforePickup, "获得");
+
+            _toastCountBeforeCraft = _toastSequence.Count;
             _craftResult = TryCraftUsingLoot(inventory, _lootItemId);
+            string craftFeedback = DescribeFeedback(_toastCountBeforeCraft, "制作完成");
+            _feedbackResult = pickupFeedback + "；" + craftFeedback;
+
             _lootResult = _craftResult.StartsWith("PASS", StringComparison.Ordinal)
                 ? "PASS itemId=" + _lootItemId + " 入包=" + _lootItemCount + " eventCount=1"
                 : "FAIL " + _craftResult;
             RestoreBagSnapshot();
+        }
+
+        /// <summary> 判断某个动作是否恰好产生一条指定前缀的提示（多了=重复，没有或前缀不对=被覆盖）。 </summary>
+        private static string DescribeFeedback(int beforeIndex, string expectedPrefix)
+        {
+            if (beforeIndex < 0 || beforeIndex > _toastSequence.Count) return "SKIP 未记录到该动作前的提示基线";
+
+            int added = _toastSequence.Count - beforeIndex;
+            string matched = null;
+            int matchedCount = 0;
+            for (int i = beforeIndex; i < _toastSequence.Count; i++)
+            {
+                if (!_toastSequence[i].StartsWith(expectedPrefix, StringComparison.Ordinal)) continue;
+                matchedCount++;
+                matched = _toastSequence[i];
+            }
+
+            return added == 1 && matchedCount == 1
+                ? "PASS 「" + matched + "」恰好 1 条"
+                : "FAIL 期望 1 条「" + expectedPrefix + "…」，实际新增 " + added + " 条 ["
+                  + string.Join(" | ", DescribeRange(beforeIndex)) + "]";
+        }
+
+        /// <summary>
+        /// 输出 5 个 `EnemyProfilerMarkers` 埋点的采样情况。
+        /// 只证明「埋点生效、名字正确」——Profiler 窗口里就能按这些名字搜到；
+        /// GC Alloc 是否 0 B 受编辑器自身分配干扰，无头测不出，留给人跑 Profiler 确认。
+        /// </summary>
+        private static void AppendProfilerResult(StringBuilder sb, ref int pass, ref int fail)
+        {
+            if (_recorders == null || _recorders.Count == 0)
+            {
+                sb.AppendLine("[INFO] 性能埋点: 本轮未启用 Profiler Recorder（跳过）");
+                return;
+            }
+
+            int sampled = 0;
+            List<string> details = new List<string>();
+            for (int i = 0; i < _recorders.Count; i++)
+            {
+                Recorder recorder = _recorders[i].Value;
+                long blocks = recorder.sampleBlockCount;
+                double ms = recorder.elapsedNanoseconds / 1000000.0;
+                bool ok = recorder.isValid && blocks > 0;
+                if (ok) sampled++;
+                details.Add(_recorders[i].Key + "=" + (ok
+                    ? blocks + "次/" + ms.ToString("F2") + "ms"
+                    : "无样本"));
+            }
+
+            // 无头下 Profiler 默认关闭，Recorder 采不到样本是预期的，只报告不判失败；
+            // 埋点齐全性由 SceneAudit 的「敌人性能埋点配置」静态检查保证
+            string summary = sampled + "/" + _recorders.Count + " 个 marker 采集到样本 → "
+                + string.Join("，", details.ToArray());
+            if (sampled == _recorders.Count)
+            {
+                pass++;
+                sb.AppendLine("[PASS] 性能埋点: " + summary);
+            }
+            else
+            {
+                sb.AppendLine("[INFO] 性能埋点: " + summary
+                    + "（无头 Profiler 默认关闭，属预期；齐全性由 SceneAudit 静态检查保证）");
+            }
+        }
+
+        private static string[] DescribeRange(int fromIndex)
+        {
+            List<string> items = new List<string>();
+            for (int i = fromIndex; i < _toastSequence.Count && items.Count < 6; i++)
+                items.Add(_toastSequence[i]);
+            return items.ToArray();
         }
 
         /// <summary> 从本轮生成实例中选择至少有一个配方会消耗的掉落物。 </summary>
@@ -974,6 +1107,26 @@ namespace EditorTools
             }
         }
 
+        /// <summary>
+        /// 把任务存档写回「未接取」并让控制器重新读档，使冒烟可以反复运行。
+        /// 只改存档数据，不动任何玩法逻辑。
+        /// </summary>
+        private static void ResetQuestForTest(QuestController controller, QuestDefinition definition)
+        {
+            if (controller == null || definition == null) return;
+
+            try
+            {
+                new DAO.QuestDao().Save(definition.QuestId, definition.DefinitionVersion,
+                    QuestState.NotAccepted, new int[definition.Objectives.Count]);
+                controller.Initialize(definition);   // 重读存档，刷新内存状态并重新订阅
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[PlayModeSmokeCheck] 任务存档重置失败: " + exception.Message);
+            }
+        }
+
         private static void HandlePlayerDamaged(float remainingHealth)
         {
             _damageEvents++;
@@ -1055,6 +1208,12 @@ namespace EditorTools
                 _questAcceptResult = "SKIP 没有玩家，无法交互接取";
                 return;
             }
+
+            QuestDefinition definition = controller.Definition;
+
+            // 任务存档跨会话保留：上一轮跑完会把状态留在 Completed，
+            // 不重置的话第二跑就接不了新任务（TryAccept 只对 NotAccepted 生效）。
+            ResetQuestForTest(controller, definition);
 
             QuestGiverInteractable giver =
                 UnityEngine.Object.FindObjectOfType<QuestGiverInteractable>(true);
@@ -1340,6 +1499,22 @@ namespace EditorTools
                 + (restored ? "冒烟检查前状态已恢复" : "恢复失败，可能污染测试存档"));
             if (restored) pass++; else fail++;
 
+            // 13. 玩法反馈（10-14 批次）：每个业务动作恰好一条提示，不重复也不被覆盖
+            if (!string.IsNullOrEmpty(_feedbackResult))
+            {
+                bool feedbackOk = !_feedbackResult.Contains("FAIL");
+                if (feedbackOk) pass++; else fail++;
+                sb.AppendLine((feedbackOk ? "[PASS] " : "[FAIL] ") + "玩法反馈: " + _feedbackResult);
+            }
+            sb.AppendLine("[INFO] 本轮提示序列(" + _toastSequence.Count + " 条): "
+                + (_toastSequence.Count > 0
+                    ? string.Join(" / ", _toastSequence.GetRange(0, Mathf.Min(_toastSequence.Count, 8)).ToArray())
+                    : "无"));
+
+            // 14. 性能埋点（10-14 批次）：确认 5 个 EnemyProfilerMarkers 真的在跑，
+            //     这样 Profiler 窗口里按名字能搜到；GC Alloc 仍需在编辑器里目视确认
+            AppendProfilerResult(sb, ref pass, ref fail);
+
             sb.AppendLine();
             sb.AppendLine("TOTAL: pass=" + pass + " fail=" + fail);
             sb.AppendLine(fail == 0 ? ResultMarkerPass : ResultMarkerFail);
@@ -1368,6 +1543,13 @@ namespace EditorTools
             _lootDroppedToken = null;
             _lootSpawnToken = null;
             _pickupCompletedToken = null;
+            _toastToken?.Dispose();
+            _toastToken = null;
+            if (_recorders != null)
+            {
+                for (int i = 0; i < _recorders.Count; i++) _recorders[i].Value.enabled = false;
+                _recorders = null;
+            }
 
             EditorApplication.Exit(fail == 0 && reportWritten ? 0 : 1);
         }
